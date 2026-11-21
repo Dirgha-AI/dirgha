@@ -4,6 +4,10 @@
       "command": "target/release/dirgha-native-host.exe",
       "args": ["--mcp"],
       "description": "Dirgha v2 Rust kernel: Lokahi <1ms Gate, Arniko 36-Scanner SARIF, PrivacyFlow Secret Masking, and Generation-Bound Agent-DOM."
+    },
+    "exa": {
+      "url": "https://mcp.exa.ai/mcp?tools=web_search_exa,web_fetch_exa",
+      "description": "Official Exa MCP: keyless web search and clean page fetch for agents. Optional EXA_API_KEY or OAuth enables agent_run. See docs/exa-search.md."
     }
   }
 }

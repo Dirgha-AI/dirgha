@@ -48,6 +48,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --dir src && node --test ./bin/dirgha.test.mjs",
     "doctor": "node ./bin/dirgha.mjs doctor",
+    "verify:exa": "node scripts/verify-exa-mcp.mjs",
     "prepublishOnly": "npm run build && npm test"
   },
   "optionalDependencies": {

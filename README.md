@@ -57,6 +57,7 @@ node bin/dirgha.mjs            # start the agent
 | **Your choice of model** | 14 hosted provider families plus any OpenAI-compatible endpoint, or fully local models through Ollama and llama.cpp |
 | **Local memory** | Long-term memory and search in SQLite under `~/.dirgha/` |
 | **MCP both ways** | Connects to MCP servers (stdio and HTTP/SSE), and the Rust kernel serves 24 MCP tools of its own |
+| **Exa search** | Official Exa MCP registered in `.mcp.json`: keyless web search and page fetch for agents |
 | **A safety gate** | A WebAssembly gate screens every tool call; it refuses when it can't check |
 | **An audit trail** | Append-only local logs, and a signed, hash-chained ledger for gate decisions |
 | **Extensibility** | Skills in the [agentskills.io](https://agentskills.io) format, hooks, and an ESM plugin API |
@@ -173,6 +174,7 @@ Several robotics and hardware tools are **demos**: they show the interface but d
 | Guide | |
 |---|---|
 | [Getting started](docs/getting-started.md) | Install, pick a model, first tasks |
+| [Exa search](docs/exa-search.md) | Web search and page fetch through Exa's official MCP server |
 | [Safety model](docs/safety.md) | The gate, S2 approvals, the ledger, the cockpit |
 | [MCP tools](docs/mcp-tools.md) | All 24 kernel tools, generated from the binary |
 | [Robotics](docs/robotics.md) | MuJoCo evaluation and simulation tools |
