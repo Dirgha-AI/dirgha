@@ -59,6 +59,7 @@ import { nodeSubcommand } from './node.js';
 import { gpuSubcommand } from './gpu.js';
 import { scanSubcommand } from './scan.js';
 import { policySubcommand } from './policy.js';
+import { desktopSubcommand } from './desktop.js';
 
 export const subcommands: Subcommand[] = [
   doctorSubcommand,
@@ -99,6 +100,7 @@ export const subcommands: Subcommand[] = [
   gpuSubcommand,
   scanSubcommand,
   policySubcommand,
+  desktopSubcommand,
 ];
 
 export function findSubcommand(verb: string): Subcommand | undefined {

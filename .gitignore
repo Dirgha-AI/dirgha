@@ -24,6 +24,8 @@ Thumbs.db
 # Build output and local test state
 /dist/
 /bin/native/
+/desktop/dist/
+/desktop/src-tauri/target/
 **/data/keys/
 *.key
 .env
