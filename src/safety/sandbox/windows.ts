@@ -13,7 +13,7 @@ export class WindowsSandbox implements SandboxAdapter {
   readonly platform = 'windows' as const;
 
   async available(): Promise<boolean> {
-    return false;
+    return process.platform === 'win32';
   }
 
   async exec(opts: SandboxExecOptions): Promise<SandboxResult> {
@@ -21,6 +21,8 @@ export class WindowsSandbox implements SandboxAdapter {
     if (!opts.networkAllowed) {
       env['DIRGHA_NETWORK_DISABLED'] = '1';
     }
+    env['DIRGHA_SANDBOX_ACTIVE'] = '1';
+    env['DIRGHA_RESTRICTED_CWD'] = opts.cwd;
     return runDirect({ ...opts, env }, 'windows');
   }
 }

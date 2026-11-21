@@ -129,7 +129,9 @@ export function createToolExecutor(opts: ToolExecutorOptions): ToolExecutor {
         sessionId: opts.sessionId,
         signal,
         sandbox,
-        sandboxMode: opts.sandboxMode ?? "off",
+        sandboxMode:
+          opts.sandboxMode ??
+          ((process.env.DIRGHA_SANDBOX_MODE as SandboxMode) || "auto"),
         autoApprove: opts.autoApprove,
         log: opts.log,
         onProgress: opts.onProgress

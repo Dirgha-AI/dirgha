@@ -101,11 +101,17 @@ pub struct NormalizedCommandStage {
     pub args: Vec<String>,
 }
 
-/// Tokenize a command string into pipeline/chained stages (`|`, `;`, `&&`, `||`, `\n`)
-/// and normalize short/long flag permutations (e.g. `-fr` -> `-f`, `-r`; `--recursive` -> `-r`).
+/// Tokenize a command string into pipeline/chained stages (`|`, `;`, `&&`, `||`, `\n`, subshells `(`, `)`)
+/// and normalize short/long flag permutations (e.g. `-fr` -> `-f`, `-r`; `--recursive` -> `-r`, `"-rf"` -> `-r`, `-f`).
 pub fn parse_and_normalize_shell_stages(input: &str) -> Vec<NormalizedCommandStage> {
     let mut stages = Vec::new();
-    let cleaned = input.replace("$(", " ; ").replace('`', " ; ");
+    let cleaned = input
+        .replace("$(", " ; ")
+        .replace('`', " ; ")
+        .replace('(', " ; ")
+        .replace(')', " ; ")
+        .replace('{', " ; ")
+        .replace('}', " ; ");
     for raw_stage in cleaned.split(|c| c == '|' || c == ';' || c == '\n' || c == '&') {
         let tokens: Vec<&str> = raw_stage
             .split_whitespace()
@@ -119,7 +125,7 @@ pub fn parse_and_normalize_shell_stages(input: &str) -> Vec<NormalizedCommandSta
         while idx < tokens.len() {
             let low = tokens[idx].to_ascii_lowercase();
             if matches!(low.as_str(), "sudo" | "env" | "nohup" | "command" | "busybox" | "doas")
-                || low.contains('=')
+                || (low.contains('=') && !low.starts_with('-'))
             {
                 idx += 1;
             } else {
@@ -130,16 +136,25 @@ pub fn parse_and_normalize_shell_stages(input: &str) -> Vec<NormalizedCommandSta
             continue;
         }
 
-        let program = tokens[idx]
+        let raw_prog = tokens[idx]
+            .trim_matches(|c: char| c == '"' || c == '\'' || c == '\\' || c == '(' || c == ')');
+        let program = raw_prog
             .rsplit(['/', '\\'])
             .next()
-            .unwrap_or(tokens[idx])
+            .unwrap_or(raw_prog)
             .to_ascii_lowercase();
         let mut flags = BTreeSet::new();
         let mut args = Vec::new();
 
         for &tok in &tokens[idx + 1..] {
-            let low = tok.to_ascii_lowercase();
+            // Unquote and strip escapes to defeat quoted-flag and obfuscation bypasses (e.g. "-r", '-rf', "r\m")
+            let unquoted = tok
+                .trim_matches(|c: char| c == '"' || c == '\'' || c == '(' || c == ')' || c == '{' || c == '}')
+                .replace('\\', "");
+            let low = unquoted.to_ascii_lowercase();
+            if low.is_empty() {
+                continue;
+            }
             if let Some(long_flag) = low.strip_prefix("--") {
                 match long_flag {
                     "recursive" => {
@@ -179,7 +194,21 @@ pub fn parse_and_normalize_shell_stages(input: &str) -> Vec<NormalizedCommandSta
                     }
                 }
             } else {
-                args.push(low.trim_matches(|c| c == '"' || c == '\'').to_string());
+                // Path canonicalization normalizer (collapsing // and /./)
+                let mut norm_arg = low.replace('\\', "/");
+                while norm_arg.contains("//") {
+                    norm_arg = norm_arg.replace("//", "/");
+                }
+                while norm_arg.contains("/./") {
+                    norm_arg = norm_arg.replace("/./", "/");
+                }
+                if norm_arg.ends_with("/.") {
+                    norm_arg.truncate(norm_arg.len() - 2);
+                }
+                if norm_arg.is_empty() {
+                    norm_arg = "/".to_string();
+                }
+                args.push(norm_arg);
             }
         }
 
@@ -315,7 +344,7 @@ fn detect_destructive_or_obfuscated_command(payload: &str) -> Option<(String, St
         }
 
         // Check decode-to-shell pipeline (`base64 -d | sh`, `xxd -r | bash`, `certutil -decode`)
-        if (prog == "base64" && stage.flags.contains("-d"))
+        if (prog == "base64" && (stage.flags.contains("-d") || stage.flags.contains("--decode")))
             || (prog == "xxd" && stage.flags.contains("-r"))
             || (prog == "openssl" && stage.flags.contains("-d"))
             || (prog == "certutil" && stage.args.iter().any(|a| a.contains("decode")))
@@ -325,7 +354,7 @@ fn detect_destructive_or_obfuscated_command(payload: &str) -> Option<(String, St
         if saw_decoder
             && matches!(
                 prog,
-                "sh" | "bash" | "zsh" | "dash" | "pwsh" | "powershell" | "iex" | "invoke-expression" | "eval"
+                "sh" | "bash" | "zsh" | "dash" | "pwsh" | "powershell" | "iex" | "invoke-expression" | "eval" | "python" | "python3" | "node"
             )
         {
             return Some((
@@ -340,13 +369,19 @@ fn detect_destructive_or_obfuscated_command(payload: &str) -> Option<(String, St
             let has_f = stage.flags.contains("-f");
             let no_preserve = stage.flags.contains("--no-preserve-root");
             let critical_target = stage.args.iter().any(|a| {
+                let a_clean = a.trim_end_matches('/');
                 matches!(
                     a.as_str(),
-                    "/" | "/*" | "~" | "~/*" | ".." | "../" | "c:\\" | "c:/" | "*"
-                ) || a.starts_with("/etc")
+                    "/" | "/*" | "/." | "/./" | "//" | "~" | "~/*" | ".." | "../" | "c:" | "c:\\" | "c:/" | "*"
+                ) || a_clean.is_empty()
+                    || a.starts_with('$') // Variable indirection ($TARGET, $ROOT)
+                    || a.starts_with('%') // Windows env indirection (%SYSTEMDRIVE%)
+                    || a.starts_with("/etc")
                     || a.starts_with("/boot")
                     || a.starts_with("/usr")
                     || a.starts_with("/var")
+                    || a.starts_with("c:/windows")
+                    || a.starts_with("c:/system32")
             });
             if no_preserve || ((has_r && has_f) && (critical_target || stage.args.is_empty())) {
                 return Some((
@@ -539,14 +574,19 @@ pub fn evaluate_proposal_with_context(proposal: &ActionProposal, context: &GateC
     }
 
     // SEC-007: Path Traversal & OS Credential Store Access
-    if lower.contains("/etc/shadow")
-        || lower.contains("/etc/sudoers")
-        || lower.contains("/etc/passwd")
-        || lower.contains(".ssh/id_")
-        || lower.contains(".dirgha/keys.json")
-        || lower.contains(".dirgha\\keys.json")
-        || lower.contains("system32\\config\\sam")
-        || lower.contains("system32/config/sam")
+    let mut norm_path = lower.replace('\\', "/");
+    while norm_path.contains("//") {
+        norm_path = norm_path.replace("//", "/");
+    }
+    while norm_path.contains("/./") {
+        norm_path = norm_path.replace("/./", "/");
+    }
+    if norm_path.contains("/etc/shadow")
+        || norm_path.contains("/etc/sudoers")
+        || norm_path.contains("/etc/passwd")
+        || norm_path.contains(".ssh/id_")
+        || norm_path.contains(".dirgha/keys.json")
+        || norm_path.contains("system32/config/sam")
     {
         return GateVerdict::Deny {
             rule_id: "SEC-007".into(),
@@ -1161,5 +1201,48 @@ mod tests {
         }}}
         assert_eq!(count, 256);
         assert_eq!(lokahi_c_abi_evaluate_utf8("cargo test --workspace".as_ptr(), "cargo test --workspace".len(), 1), 0);
+    }
+
+    #[test]
+    fn test_enterprise_red_team_bypasses_blocked() {
+        let bypass_payloads = [
+            // 1. Quoted flags
+            r#"rm "-r" "-f" /"#,
+            r#"rm '-rf' /"#,
+            r#"""rm -r""f /"#,
+            r#"rm "-rf" /"#,
+            // 2. Normalized path traversal / root variants
+            "rm -rf /./",
+            "rm -rf //",
+            "rm -rf /././",
+            "rm -rf /etc/./",
+            // 3. Variable indirection targeting root
+            "rm -rf $TARGET",
+            "rm -rf $ROOT",
+            "rm -rf %SYSTEMDRIVE%",
+            // 4. Subshell wrapping
+            "(rm -rf /)",
+            "{ rm -rf /; }",
+            // 5. Credential path traversal with dots
+            "cat /etc/./shadow",
+            "cat /etc//passwd",
+            "cat /etc/./passwd",
+            // 6. Base64 decode variants
+            "echo cm0gLXJmIC8= | base64 --decode | bash",
+            "echo cm0gLXJmIC8= | openssl base64 -d | sh",
+        ];
+
+        for &cmd in &bypass_payloads {
+            let prop = s0("shell", cmd);
+            assert!(
+                !evaluate_proposal(&prop).is_allowed(),
+                "CRITICAL: Exploit bypass payload '{cmd}' was not blocked by LOKAHI Gate!"
+            );
+            assert_eq!(
+                lokahi_c_abi_evaluate_utf8(cmd.as_ptr(), cmd.len(), 0),
+                0,
+                "C-ABI evaluate must refuse '{cmd}'"
+            );
+        }
     }
 }

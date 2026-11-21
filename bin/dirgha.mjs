@@ -222,6 +222,23 @@ async function main() {
     return;
   }
 
+  // Route `gateway` / `proxy` to Dirgha Agent Gateway (Claude Code & Cursor interceptor)
+  if (cmd === "gateway" || cmd === "proxy") {
+    let port = 8080;
+    const portIdx = args.indexOf("--port");
+    if (portIdx !== -1 && args[portIdx + 1]) {
+      port = parseInt(args[portIdx + 1], 10);
+    }
+    const gatewayDistPath = path.join(rootDir, "dist", "gateway", "server.js");
+    if (fs.existsSync(gatewayDistPath)) {
+      const mod = await import(pathToFileURL(gatewayDistPath).href);
+      mod.startGatewayServer({ port });
+      return;
+    }
+    console.error("Gateway dist not built. Run 'npm run build' first.");
+    process.exit(1);
+  }
+
   // Route v2.0 Sovereign Kernel & Physical AI verbs directly to `dirgha-native-host`
   if (cmd && V2_KERNEL_VERBS.has(cmd)) {
     const nativeBin = resolveNativeBinary();
