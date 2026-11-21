@@ -317,7 +317,7 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
                   <p>
                     {t(
                       "app.start.body",
-                      "Continue the same Sessions from DeepCode CLI, with tools, approvals, changes, and tests kept in one local workspace.",
+                      "Continue the same Sessions from Dirgha CLI, with tools, approvals, changes, and tests kept in one local workspace.",
                     )}
                   </p>
                   <div className={styles.startActions}>
@@ -351,7 +351,7 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
                   <p>
                     {t(
                       "app.noSessions.body",
-                      "Start with a clear outcome and a way to verify it. DeepCode will keep the conversation and execution trail together.",
+                      "Start with a clear outcome and a way to verify it. Dirgha will keep the conversation and execution trail together.",
                     )}
                   </p>
                   <div className={styles.startActions}>

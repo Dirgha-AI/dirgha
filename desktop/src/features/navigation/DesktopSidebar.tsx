@@ -229,7 +229,7 @@ export function DesktopSidebar({
           </svg>
         </span>
         <span className={styles.brandCopy}>
-          <strong>DeepCode</strong>
+          <strong>Dirgha</strong>
           <small>{t("sidebar.localAgent", "Local agent")}</small>
         </span>
         {drawer ? (
