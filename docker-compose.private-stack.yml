@@ -1,0 +1,73 @@
+# Dirgha 2.0 Private Sovereign Stack — Reference Docker Compose
+#
+# Core service runs Dirgha daemon with optional Organization Policy Lock.
+# Optional profiles let enterprises enable only what they need:
+#   --profile local-llm   : Air-gapped local inference via Ollama
+#   --profile security    : On-demand Arniko/SARIF security scanning workspace
+#
+# Never commit real secrets to this file. Supply tokens via `.env` or your secret manager.
+
+services:
+  dirgha-daemon:
+    image: node:22-slim
+    container_name: dirgha-daemon
+    working_dir: /workspace/dirgha
+    restart: unless-stopped
+    command: ["node", "bin/dirgha.mjs", "doctor"]
+    environment:
+      DIRGHA_PROFILE: "${DIRGHA_PROFILE:-enterprise}"
+      DIRGHA_LOKAHI_MODE: "${DIRGHA_LOKAHI_MODE:-enforce}"
+      DIRGHA_ARNIKO: "${DIRGHA_ARNIKO:-true}"
+      DIRGHA_GPU_MARKET: "${DIRGHA_GPU_MARKET:-true}"
+      DIRGHA_ORG_POLICY: "${DIRGHA_ORG_POLICY:-/etc/dirgha/policy.json}"
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      OLLAMA_HOST: "${OLLAMA_HOST:-http://ollama:11434}"
+    volumes:
+      - .:/workspace/dirgha:ro
+      - dirgha-state:/root/.dirgha
+      # Mount your immutable organization policy lock file read-only:
+      # - ./org-policy.json:/etc/dirgha/policy.json:ro
+    networks:
+      - dirgha-internal
+    security_opt:
+      - no-new-privileges:true
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: dirgha-ollama
+    profiles: ["local-llm"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    networks:
+      - dirgha-internal
+
+  arniko-scanner:
+    image: node:22-slim
+    container_name: dirgha-arniko-scanner
+    profiles: ["security"]
+    working_dir: /workspace/target
+    command: ["node", "/workspace/dirgha/bin/dirgha.mjs", "scan", "--sarif"]
+    environment:
+      DIRGHA_PROFILE: "${DIRGHA_PROFILE:-enterprise}"
+      DIRGHA_ARNIKO: "true"
+    volumes:
+      - .:/workspace/dirgha:ro
+      - ${SCAN_TARGET_DIR:-.}:/workspace/target:ro
+    networks:
+      - dirgha-internal
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  dirgha-state:
+  ollama-models:
+
+networks:
+  dirgha-internal:
+    driver: bridge

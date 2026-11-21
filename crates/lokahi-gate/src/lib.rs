@@ -278,15 +278,47 @@ fn detect_destructive_or_obfuscated_command(payload: &str) -> Option<(String, St
 
     let stages = parse_and_normalize_shell_stages(payload);
     let mut saw_decoder = false;
+    let mut saw_downloader = false;
 
     for stage in &stages {
         let prog = stage.program.as_str();
+
+        // Check download-to-shell pipeline (`curl ... | sh`, `wget ... | bash`)
+        if matches!(prog, "curl" | "wget" | "fetch") {
+            saw_downloader = true;
+        }
+        if saw_downloader
+            && matches!(
+                prog,
+                "sh" | "bash" | "zsh" | "dash" | "pwsh" | "powershell" | "iex" | "invoke-expression" | "python" | "python3"
+            )
+        {
+            return Some((
+                "SEC-009".into(),
+                "Remote download-to-shell execution pipeline (`curl|sh` / `wget|bash`) blocked".into(),
+            ));
+        }
+
+        // Check nested shell/interpreter inline destructive invocations (`sh -c "rm -rf /"`)
+        if matches!(prog, "sh" | "bash" | "zsh" | "dash" | "python" | "python3")
+            && stage.flags.contains("-c")
+            && (lower.contains("rm -rf /")
+                || lower.contains("rm -fr /")
+                || lower.contains("shutil.rmtree('/')")
+                || lower.contains("shutil.rmtree(\"/\")")
+                || lower.contains("/etc/shadow"))
+        {
+            return Some((
+                "SEC-008".into(),
+                "Nested interpreter destructive payload (`-c`) blocked".into(),
+            ));
+        }
 
         // Check decode-to-shell pipeline (`base64 -d | sh`, `xxd -r | bash`, `certutil -decode`)
         if (prog == "base64" && stage.flags.contains("-d"))
             || (prog == "xxd" && stage.flags.contains("-r"))
             || (prog == "openssl" && stage.flags.contains("-d"))
-            || (prog == "certutil" && stage. args.iter().any(|a| a.contains("decode")))
+            || (prog == "certutil" && stage.args.iter().any(|a| a.contains("decode")))
         {
             saw_decoder = true;
         }
@@ -487,8 +519,18 @@ pub fn evaluate_proposal_with_context(proposal: &ActionProposal, context: &GateC
         || lower.contains("169.254.170.2")
         || lower.contains("metadata.google.internal")
         || lower.contains("fd00:ec2::254")
+        || lower.contains("::ffff:169.254.169.254")
+        || lower.contains("::ffff:127.0.0.1")
         || lower.contains("0x7f000001")
+        || lower.contains("2852039166")
         || lower.contains("http://[::1]")
+        || lower.contains("https://[::1]")
+        || lower.contains("http://127.0.0.1")
+        || lower.contains("https://127.0.0.1")
+        || lower.contains("http://0.0.0.0")
+        || lower.contains("https://0.0.0.0")
+        || lower.contains("http://localhost")
+        || lower.contains("https://localhost")
     {
         return GateVerdict::Deny {
             rule_id: "SEC-006".into(),
@@ -499,9 +541,12 @@ pub fn evaluate_proposal_with_context(proposal: &ActionProposal, context: &GateC
     // SEC-007: Path Traversal & OS Credential Store Access
     if lower.contains("/etc/shadow")
         || lower.contains("/etc/sudoers")
+        || lower.contains("/etc/passwd")
+        || lower.contains(".ssh/id_")
+        || lower.contains(".dirgha/keys.json")
+        || lower.contains(".dirgha\\keys.json")
         || lower.contains("system32\\config\\sam")
         || lower.contains("system32/config/sam")
-        || (lower.contains("../") && (lower.contains("/etc/passwd") || lower.contains(".ssh/id_")))
     {
         return GateVerdict::Deny {
             rule_id: "SEC-007".into(),
@@ -937,6 +982,29 @@ pub extern "C" fn lokahi_wasm_run_red_team_50() -> i32 {
     report.passed_scenarios as i32
 }
 
+/// Allocate a guest buffer in WASM linear memory so hosts never write to hardcoded scratch offsets.
+#[unsafe(no_mangle)]
+pub extern "C" fn lokahi_alloc(len: usize) -> *mut u8 {
+    if len == 0 {
+        return std::ptr::NonNull::<u8>::dangling().as_ptr();
+    }
+    let mut buf = Vec::<u8>::with_capacity(len);
+    let ptr = buf.as_mut_ptr();
+    std::mem::forget(buf);
+    ptr
+}
+
+/// Free a guest buffer previously returned by `lokahi_alloc`.
+#[unsafe(no_mangle)]
+pub extern "C" fn lokahi_free(ptr: *mut u8, len: usize) {
+    if ptr.is_null() || len == 0 {
+        return;
+    }
+    unsafe {
+        let _ = Vec::from_raw_parts(ptr, 0, len);
+    }
+}
+
 /// Exported C-ABI (`cdylib` / WASM / Python `ctypes` / Node `ffi`) function that evaluates
 /// a UTF-8 command/payload buffer `(ptr, len)` against the gate rules.
 /// Returns `1` if `Allow`, `0` if `Deny`, and `-1` on invalid pointer/UTF-8.
@@ -959,8 +1027,8 @@ pub extern "C" fn lokahi_c_abi_evaluate_utf8(ptr: *const u8, len: usize, is_s2_c
         },
         human_signature_verified: false,
         approval_wait_ms: 0,
-                approval_signature_hex: None,
-                approver_public_key_hex: None,
+        approval_signature_hex: None,
+        approver_public_key_hex: None,
         joint_velocity_rad_s: None,
         max_joint_velocity_limit: None,
     };

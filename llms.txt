@@ -1,28 +1,44 @@
 # Dirgha
 
-> Open-source agent harness for software and robots, by Dirgha AI. Runs a coding agent and MuJoCo robot simulations on your own machine, with any model provider or local models, and checks every action with a fail-closed safety gate before it runs. Apache-2.0.
+> Dirgha is an Apache-2.0 open-source local coding agent, modular governance gate, and open GPU compute router built by Dirgha AI. It runs on a developer's machine or inside a private enterprise cluster with any BYOK model provider or local Ollama/llama.cpp model, keeping solo workflows zero-friction by default while enabling fail-closed LOKAHI policy enforcement, Arniko SARIF scanning, Exa MCP web search, Open GPU Cloud Market routing, and MuJoCo robotics evaluation.
 
-Dirgha has two parts behind one command: a TypeScript coding agent and a Rust kernel (`dirgha-native-host`, about 1 MB) that serves 24 MCP tools over stdio. Six robotics and hardware tools are demos and return `"simulated": true`. Full rules for teams live in LOKAHI.
+## Core capabilities
+- **Coding agent & TUI:** Interactive terminal UI, one-shot CLI, git-worktree parallel fleet (`dirgha fleet`), local SQLite memory, LSP code navigation, checkpoints, and ESM extensions.
+- **Progressive governance:** Five built-in profiles (`developer`, `safe-dev`, `team`, `enterprise`, `robotics`). `developer` keeps LOKAHI and Arniko off by default; enterprises can deploy a read-only `/etc/dirgha/policy.json` Org Policy Lock that refuses bypass flags fail-closed.
+- **LOKAHI policy & evidence:** RFC-8785 + Ed25519 signed tool and argument manifests (`dirgha policy`), 45-second dual-control S2 approval tickets, WebAssembly safety gate (`lokahi_gate.wasm`), and auditor-ready compliance evidence packs.
+- **Arniko security scanning:** Opt-in pre-commit and agent-output secret hooks (`dirgha-builtin-secrets` with automatic value redaction) plus honest orchestration of locally installed `gitleaks`, `semgrep`, and `trivy` emitting OASIS SARIF v2.1.0.
+- **Open GPU Cloud Market:** Multi-cloud GPU discovery (`dirgha gpu find`), residency/compliance filtering (`soc2`, `iso27001`, `dpdp`, `gdpr`), RFC-4180 chargeback CSV exports, and open third-party provider onboarding (`specs/GPU_PROVIDER_SCHEMA.json` + starter server).
+- **Exa MCP search & MCP kernel:** Official keyless Exa MCP (`web_search_exa`, `web_fetch_exa`) registered in `.mcp.json`, plus a Rust native kernel (`dirgha-native-host`) serving 24 MCP tools over stdio (six robotics/hardware demo tools honestly return `"simulated": true`).
+- **Private sovereign deployment:** Local Control Plane UI (`npm run dev`), Docker Compose stack (`docker-compose.private-stack.yml`), and hardened Kubernetes manifests (`deploy/k8s/dirgha-enterprise.yaml`).
 
 ## Start here
-- [README](https://github.com/Dirgha-AI/dirgha/blob/main/README.md): what Dirgha is, install, commands, safety model, status
-- [AGENTS.md](https://github.com/Dirgha-AI/dirgha/blob/main/AGENTS.md): build, test and change rules for AI agents working on the code
+- [README](https://github.com/Dirgha-AI/dirgha/blob/main/README.md): overview, pain points solved, progressive governance profiles, quick start, FAQ
+- [AGENTS.md](https://github.com/Dirgha-AI/dirgha/blob/main/AGENTS.md): build, test, and fail-closed safety rules for AI coding agents
+- [Enterprise stack](https://github.com/Dirgha-AI/dirgha/blob/main/docs/ENTERPRISE_STACK.md): Org Policy Lock, compliance mapping (EU AI Act, ISO 42001, NIST AI RMF, CRA, DPDP/GDPR), commercial tiers
 - [CHANGELOG](https://github.com/Dirgha-AI/dirgha/blob/main/CHANGELOG.md): release notes
 
-## Guides
-- [Local models](https://github.com/Dirgha-AI/dirgha/blob/main/docs/local-models.md): Ollama and llama.cpp
-- [Windows installation](https://github.com/Dirgha-AI/dirgha/blob/main/docs/windows-installation.md)
+## Core guides
+- [Getting started](https://github.com/Dirgha-AI/dirgha/blob/main/docs/getting-started.md): installation, model keys, first commands
+- [Open GPU Cloud Market](https://github.com/Dirgha-AI/dirgha/blob/main/docs/gpu-cloud-market.md): routing, certification, chargeback exports, third-party onboarding
+- [GPU Provider Schema](https://github.com/Dirgha-AI/dirgha/blob/main/specs/GPU_PROVIDER_SCHEMA.json): JSON Schema v1.0 for partner GPU cloud providers
+- [GPU Provider Starter Server](https://github.com/Dirgha-AI/dirgha/blob/main/examples/gpu-provider-starter/server.mjs): zero-dependency reference partner GPU server
+- [Exa search](https://github.com/Dirgha-AI/dirgha/blob/main/docs/exa-search.md): official Exa MCP setup and `npm run verify:exa`
+- [Safety model](https://github.com/Dirgha-AI/dirgha/blob/main/docs/safety.md): WebAssembly gate, S2 approvals, signed ledger
+- [MCP tools](https://github.com/Dirgha-AI/dirgha/blob/main/docs/mcp-tools.md): all 24 native kernel MCP tools
+- [Kubernetes deployment](https://github.com/Dirgha-AI/dirgha/blob/main/deploy/k8s/README.md): restricted Pod Security private stack deployment
+- [Robotics](https://github.com/Dirgha-AI/dirgha/blob/main/docs/robotics.md): MuJoCo evaluation and simulation workflows
+- [Local models](https://github.com/Dirgha-AI/dirgha/blob/main/docs/local-models.md): Ollama and llama.cpp setup
 - [Fleet tutorial](https://github.com/Dirgha-AI/dirgha/blob/main/docs/tutorials/fleet.md): parallel agents in git worktrees
-- [Sub-agents tutorial](https://github.com/Dirgha-AI/dirgha/blob/main/docs/tutorials/subagents.md)
-- [Extensions](https://github.com/Dirgha-AI/dirgha/blob/main/docs/extensions.md): plugin API
-- [Long-running commands](https://github.com/Dirgha-AI/dirgha/blob/main/docs/agents/long-running-commands.md)
+- [Sub-agents tutorial](https://github.com/Dirgha-AI/dirgha/blob/main/docs/tutorials/subagents.md): task delegation
+- [Extensions](https://github.com/Dirgha-AI/dirgha/blob/main/docs/extensions.md): skills and ESM plugin API
+- [Windows installation](https://github.com/Dirgha-AI/dirgha/blob/main/docs/windows-installation.md)
 
-## Security
-- [SECURITY.md](https://github.com/Dirgha-AI/dirgha/blob/main/SECURITY.md)
-- [Supply chain](https://github.com/Dirgha-AI/dirgha/blob/main/docs/security/SUPPLY-CHAIN.md)
+## Security & privacy
+- [SECURITY.md](https://github.com/Dirgha-AI/dirgha/blob/main/SECURITY.md): private vulnerability disclosure
+- [Supply chain](https://github.com/Dirgha-AI/dirgha/blob/main/docs/security/SUPPLY-CHAIN.md): dependency pinning, SBOM/VEX, OIDC provenance
 - [Telemetry](https://github.com/Dirgha-AI/dirgha/blob/main/docs/privacy/CLI-TELEMETRY.md): off by default
 
-## Related
-- [LOKAHI](https://github.com/Dirgha-AI/lokahi): open rules format and gate for agent actions (`pip install lokahi`)
-- [Arniko](https://github.com/Dirgha-AI/arniko): security scanner for AI agent code
-- [Ahimsa AI](https://github.com/Dirgha-AI/ahimsa-ai): impact assessment that compiles to rules
+## Related Dirgha AI projects
+- [LOKAHI](https://github.com/Dirgha-AI/lokahi): open rules format, signed manifests, and fail-closed gate (Apache-2.0)
+- [Arniko](https://github.com/Dirgha-AI/arniko): security scanner orchestration for AI agent code (Apache-2.0)
+- [Ahimsa AI](https://github.com/Dirgha-AI/ahimsa-ai): impact assessment that compiles to LOKAHI rules (MIT)

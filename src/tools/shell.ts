@@ -26,6 +26,7 @@ import { resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import type { Tool } from "./registry.js";
 import type { ToolResult } from "../kernel/types.js";
+import { canonicalizePath } from "../utils/fs.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -132,8 +133,8 @@ export const shellTool: Tool = {
     const streamOutput = input.streamOutput ?? false;
 
     {
-      const resolvedCwd = resolve(cwd);
-      const resolvedCtx = resolve(ctx.cwd);
+      const resolvedCwd = canonicalizePath(resolve(cwd));
+      const resolvedCtx = canonicalizePath(resolve(ctx.cwd));
       const baseSep = resolvedCtx.endsWith(sep) ? resolvedCtx : resolvedCtx + sep;
       if (resolvedCwd !== resolvedCtx && !resolvedCwd.startsWith(baseSep)) {
         return { content: `cwd escapes workspace: ${cwd}`, isError: true };
@@ -144,16 +145,28 @@ export const shellTool: Tool = {
     // via `/sandbox`, forward the command to the platform sandbox
     // adapter (bwrap / sandbox-exec / Job Object) so the spawned
     // child can only write inside `cwd`. `strict` additionally bans
-    // network. `off` keeps the legacy direct-spawn path below.
+    // network and MUST fail closed if no real sandbox is available.
+    const sandbox = ctx.sandbox;
+    const sandboxReady =
+      sandbox !== null &&
+      sandbox.platform !== "noop" &&
+      (await sandbox.available().catch(() => false));
+
+    if (ctx.sandboxMode === "strict" && !sandboxReady) {
+      return {
+        content:
+          `Strict sandbox mode refused execution: no real OS sandbox is available on this host ` +
+          `(detected: ${sandbox?.platform ?? "none"}). Install bubblewrap (Linux), use sandbox-exec (macOS), ` +
+          `or switch /sandbox to "auto" or "off".`,
+        isError: true,
+      };
+    }
+
     const sandboxActive =
       (ctx.sandboxMode === "auto" || ctx.sandboxMode === "strict") &&
-      ctx.sandbox !== null;
-    const sandbox = ctx.sandbox;
-    if (
-      sandboxActive &&
-      sandbox !== null &&
-      (await sandbox.available().catch(() => false))
-    ) {
+      sandboxReady &&
+      sandbox !== null;
+    if (sandboxActive && sandbox !== null) {
       const cmd =
         process.platform === "win32"
           ? (await resolveWindowsShell()).args(input.command)
@@ -300,19 +313,38 @@ export const shellTool: Tool = {
      * timeout (child may be mid-network-call, needs a moment to flush).
      */
     const killChild = (reason: "abort" | "timeout"): void => {
+      const pid = childProcess.pid;
+      if (!pid) return;
+      if (process.platform === "win32") {
+        // Windows has no POSIX negative-PGID kill; use taskkill /T /F to reap the whole tree.
+        try {
+          spawn("taskkill", ["/PID", String(pid), "/T", "/F"], {
+            stdio: "ignore",
+            windowsHide: true,
+          }).unref();
+        } catch {
+          try {
+            childProcess.kill("SIGKILL");
+          } catch {
+            /* already gone */
+          }
+        }
+        return;
+      }
       try {
-        process.kill(-childProcess.pid!, "SIGTERM");
+        process.kill(-pid, "SIGTERM");
       } catch {
         /* already gone */
       }
       const graceMs = reason === "abort" ? 250 : 2_000;
-      setTimeout(() => {
+      const killTimer = setTimeout(() => {
         try {
-          process.kill(-childProcess.pid!, "SIGKILL");
+          process.kill(-pid, "SIGKILL");
         } catch {
           /* already gone */
         }
       }, graceMs);
+      killTimer.unref();
     };
 
     const timer = setTimeout(() => killChild("timeout"), timeoutMs);

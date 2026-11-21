@@ -9,6 +9,7 @@
  */
 
 import { resolve, sep } from 'node:path';
+import type { ToolCall } from '../kernel/types.js';
 
 export interface PermissionCheck {
   tool: string;
@@ -24,6 +25,8 @@ export interface PermissionDecision {
 
 export interface PermissionEngine {
   check(req: PermissionCheck): PermissionDecision;
+  /** Optional rich check with full ToolCall input payload (command, path, URL, GPU budget/jurisdiction). */
+  checkCall?(call: ToolCall): PermissionDecision;
 }
 
 export class DefaultPermissionEngine implements PermissionEngine {

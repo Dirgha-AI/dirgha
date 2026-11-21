@@ -24,6 +24,12 @@ const BOOLEAN_FLAGS = new Set<string>([
   "force",
   "verbose",
   "yolo",
+  "lokahi",
+  "no-lokahi",
+  "arniko",
+  "no-arniko",
+  "no-gpu",
+  "sarif",
 ]);
 
 export function parseFlags(argv: string[]): ParsedFlags {

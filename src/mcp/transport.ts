@@ -166,12 +166,27 @@ export interface HttpTransportOptions {
 export class HttpTransport implements Transport {
   private handlers: Array<(message: unknown) => void> = [];
   private closed = false;
+  private sessionId: string | null = null;
 
   constructor(private opts: HttpTransportOptions) {
     if (typeof fetch !== "function") {
       throw new Error(
         "HttpTransport requires a global fetch API (Node 18+ or a polyfill)",
       );
+    }
+  }
+
+  private emitSseBlock(block: string): void {
+    for (const line of block.split("\n")) {
+      if (!line.startsWith("data:")) continue;
+      const payload = line.slice(5).trim();
+      if (!payload) continue;
+      try {
+        const parsed: unknown = JSON.parse(payload);
+        for (const h of this.handlers) h(parsed);
+      } catch {
+        /* skip non-JSON SSE comments */
+      }
     }
   }
 
@@ -182,6 +197,9 @@ export class HttpTransport implements Transport {
       Accept: "application/json, text/event-stream",
       ...(this.opts.headers ?? {}),
     };
+    if (this.sessionId && !headers["mcp-session-id"]) {
+      headers["mcp-session-id"] = this.sessionId;
+    }
     // Token resolution: bearerProvider beats bearerToken so OAuth
     // refresh paths keep working when the static option is also set.
     const token = this.opts.bearerProvider
@@ -225,6 +243,11 @@ export class HttpTransport implements Transport {
         `MCP HTTP ${resp.status}: ${await resp.text().catch(() => "")}`,
       );
 
+    const nextSessionId = resp.headers.get("mcp-session-id");
+    if (nextSessionId) {
+      this.sessionId = nextSessionId;
+    }
+
     const ctype = resp.headers.get("content-type") ?? "";
     if (ctype.includes("application/json")) {
       const body = await resp.json();
@@ -233,31 +256,23 @@ export class HttpTransport implements Transport {
     }
     if (ctype.includes("text/event-stream") && resp.body) {
       // Parse SSE: each block is `event: foo\ndata: {...}\n\n`.
-      // We only act on `data:` lines that JSON-parse cleanly.
+      // Normalize CRLF and flush any trailing data block at EOF (e.g. Exa MCP).
       const reader = resp.body.getReader();
       const decoder = new TextDecoder();
       let buf = "";
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        // Process complete events (terminated by blank line).
+        buf += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
         let idx: number;
         while ((idx = buf.indexOf("\n\n")) >= 0) {
           const block = buf.slice(0, idx);
           buf = buf.slice(idx + 2);
-          for (const line of block.split("\n")) {
-            if (!line.startsWith("data:")) continue;
-            const payload = line.slice(5).trim();
-            if (!payload) continue;
-            try {
-              const parsed: unknown = JSON.parse(payload);
-              for (const h of this.handlers) h(parsed);
-            } catch {
-              /* skip non-JSON SSE comments */
-            }
-          }
+          this.emitSseBlock(block);
         }
+      }
+      if (buf.trim().length > 0) {
+        this.emitSseBlock(buf);
       }
       return;
     }
@@ -270,6 +285,7 @@ export class HttpTransport implements Transport {
 
   async close(): Promise<void> {
     this.closed = true;
+    this.sessionId = null;
     this.handlers = [];
   }
 }

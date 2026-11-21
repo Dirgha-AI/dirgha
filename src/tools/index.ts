@@ -30,6 +30,7 @@ import { transactionalWriteTool } from "./transactional-write.js";
 import { dbWorkspaceInfoTool } from "./db-workspace-info.js";
 
 import { agentServerTool } from "./agent-server.js";
+import { gpuComputeTool } from "./gpu-compute.js";
 import { imageGenerateTool, videoGenerateTool, audioGenerateTool, speechToTextTool } from "./studio.js";
 
 export { createMultimodalTool } from "./multimodal.js";
@@ -82,6 +83,7 @@ export const builtInTools: Tool[] = [
   transactionalWriteTool,
   dbWorkspaceInfoTool,
   agentServerTool,
+  gpuComputeTool,
   imageGenerateTool,
   videoGenerateTool,
   audioGenerateTool,
@@ -113,6 +115,7 @@ export {
   transactionalWriteTool,
   dbWorkspaceInfoTool,
   agentServerTool,
+  gpuComputeTool,
   imageGenerateTool,
   videoGenerateTool,
   audioGenerateTool,

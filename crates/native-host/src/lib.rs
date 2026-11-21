@@ -53,12 +53,21 @@ use std::net::TcpStream;
 use std::path::PathBuf;
 use std::process::Command;
 
-/// Resolve the Python interpreter containing `mujoco` (checks local `harness/.venv` then shared `.venv`).
+/// Resolve the Python interpreter containing `mujoco` (checks `DIRGHA_PYTHON`, then repo-local `.venv` across POSIX & Windows).
 pub fn resolve_mujoco_python_bin() -> Option<PathBuf> {
+    if let Ok(explicit) = std::env::var("DIRGHA_PYTHON") {
+        let p = PathBuf::from(explicit.trim());
+        if p.exists() {
+            return Some(p);
+        }
+    }
     let candidates = [
+        PathBuf::from("harness/.venv/bin/python"),
+        PathBuf::from("harness/.venv/bin/python3"),
         PathBuf::from("harness/.venv/Scripts/python.exe"),
-        PathBuf::from(r"D:\Projects\Public\dirgha code 2.0\harness\.venv\Scripts\python.exe"),
-        PathBuf::from(r"D:\Projects\Public\Actuators\.venv\Scripts\python.exe"),
+        PathBuf::from(".venv/bin/python"),
+        PathBuf::from(".venv/bin/python3"),
+        PathBuf::from(".venv/Scripts/python.exe"),
     ];
     candidates.into_iter().find(|p| p.exists())
 }
@@ -1228,33 +1237,24 @@ impl NativeHostDaemon {
                     None
                 };
 
-                let (scenarios, punch_list, ci) = if let Some(p) = parsed {
-                    let sc: Vec<AcceptanceScenarioResult> =
-                        serde_json::from_value(p["scenarios"].clone()).unwrap_or_default();
-                    let pl: Vec<PunchListItem> =
-                        serde_json::from_value(p["punch_list"].clone()).unwrap_or_default();
-                    let low = p["wilson_ci_95"][0].as_f64().unwrap_or(0.8389);
-                    let high = p["wilson_ci_95"][1].as_f64().unwrap_or(1.0);
-                    (sc, pl, [low, high])
-                } else {
-                    (
-                        vec![AcceptanceScenarioResult {
-                            scenario_id: "SAT-01".into(),
-                            category: "NOMINAL_PRECISION".into(),
-                            severity: "CRITICAL".into(),
-                            description: "Nominal home-to-pick reach".into(),
-                            mass_scale: 1.0,
-                            sensor_noise_std: 0.0,
-                            torque_limit_nm: 5.0,
-                            seed: 2000,
-                            passed: true,
-                            peak_velocity_rad_s: 1.63,
-                            final_error_m: 0.026,
-                        }],
-                        vec![],
-                        [0.8389, 1.0],
-                    )
+                let Some(p) = parsed else {
+                    return Self::error_resp(
+                        req.id,
+                        -32004,
+                        &format!(
+                            "sidecar_unavailable: MuJoCo sidecar not available at {} (set DIRGHA_PYTHON or create harness/.venv with mujoco); refusing to fabricate a passing SAT dossier",
+                            script_path.display()
+                        ),
+                    );
                 };
+
+                let sc: Vec<AcceptanceScenarioResult> =
+                    serde_json::from_value(p["scenarios"].clone()).unwrap_or_default();
+                let pl: Vec<PunchListItem> =
+                    serde_json::from_value(p["punch_list"].clone()).unwrap_or_default();
+                let low = p["wilson_ci_95"][0].as_f64().unwrap_or(0.0);
+                let high = p["wilson_ci_95"][1].as_f64().unwrap_or(0.0);
+                let (scenarios, punch_list, ci) = (sc, pl, [low, high]);
 
                 let dossier = SiteAcceptanceDossier::new_signed(
                     format!("sat_{site_name}"),
@@ -1379,12 +1379,53 @@ impl NativeHostDaemon {
     /// - `GET /api/state` -> serves the live `cockpit_state_snapshot` JSON
     /// - `POST /api/rpc` -> dispatches any JSON-RPC 2.0 request through `self.handle_request`
     pub fn serve_cockpit_http_once(&mut self, stream: &mut TcpStream) -> Result<(), String> {
-        let mut buf = [0u8; 16384];
-        let n = stream.read(&mut buf).map_err(|e| e.to_string())?;
-        if n == 0 {
+        const MAX_HTTP_BYTES: usize = 1024 * 1024; // 1 MiB request cap
+        let mut raw_bytes: Vec<u8> = Vec::with_capacity(4096);
+        let mut chunk = [0u8; 4096];
+        let mut header_end: Option<usize> = None;
+        let mut content_length: usize = 0;
+
+        loop {
+            let n = stream.read(&mut chunk).map_err(|e| e.to_string())?;
+            if n == 0 {
+                break;
+            }
+            raw_bytes.extend_from_slice(&chunk[..n]);
+            if raw_bytes.len() > MAX_HTTP_BYTES {
+                let body = b"Payload Too Large";
+                let header = format!(
+                    "HTTP/1.1 413 Payload Too Large\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = stream.write_all(header.as_bytes());
+                let _ = stream.write_all(body);
+                let _ = stream.flush();
+                return Ok(());
+            }
+            if header_end.is_none() {
+                if let Some(pos) = raw_bytes.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let end = pos + 4;
+                    header_end = Some(end);
+                    let hdr_str = String::from_utf8_lossy(&raw_bytes[..pos]);
+                    for line in hdr_str.lines().skip(1) {
+                        if let Some((k, v)) = line.split_once(':') {
+                            if k.eq_ignore_ascii_case("content-length") {
+                                content_length = v.trim().parse::<usize>().unwrap_or(0);
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some(end) = header_end {
+                if raw_bytes.len() >= end + content_length {
+                    break;
+                }
+            }
+        }
+        if raw_bytes.is_empty() {
             return Ok(());
         }
-        let raw_req = String::from_utf8_lossy(&buf[..n]).to_string();
+        let raw_req = String::from_utf8_lossy(&raw_bytes).to_string();
         let first_line = raw_req.lines().next().unwrap_or("GET / HTTP/1.1");
         let parts: Vec<&str> = first_line.split_whitespace().collect();
         let method = parts.first().copied().unwrap_or("GET");
@@ -1407,13 +1448,26 @@ impl NativeHostDaemon {
             let body = raw_req
                 .split_once("\r\n\r\n")
                 .map(|(_, b)| b.trim())
-                .unwrap_or("{}");
-            let rpc_req: JsonRpcRequest = serde_json::from_str(body).unwrap_or(JsonRpcRequest {
-                jsonrpc: "2.0".into(),
-                id: json!(1),
-                method: "cockpit_state_snapshot".into(),
-                params: json!({}),
-            });
+                .unwrap_or("");
+            let rpc_req: JsonRpcRequest = match serde_json::from_str(body) {
+                Ok(parsed) => parsed,
+                Err(err) => {
+                    let err_body = serde_json::to_string(&Self::error_resp(
+                        json!(null),
+                        -32700,
+                        &format!("Parse error: invalid JSON-RPC payload ({err})"),
+                    ))
+                    .unwrap_or_else(|_| "{\"error\":\"invalid json-rpc\"}".to_string());
+                    let header = format!(
+                        "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        err_body.len()
+                    );
+                    stream.write_all(header.as_bytes()).map_err(|e| e.to_string())?;
+                    stream.write_all(err_body.as_bytes()).map_err(|e| e.to_string())?;
+                    stream.flush().map_err(|e| e.to_string())?;
+                    return Ok(());
+                }
+            };
             let rpc_resp = self.handle_request(rpc_req);
             (
                 "application/json; charset=utf-8",
@@ -2132,12 +2186,13 @@ mod tests {
                     "arguments": args
                 }),
             });
+            let is_sidecar_tool = tool_name == "dirgha_eval_run" || tool_name == "dirgha_acceptance_run";
             assert!(
-                resp.error.is_none() || tool_name == "dirgha_eval_run",
+                resp.error.is_none() || is_sidecar_tool,
                 "Tool {tool_name} returned unexpected RPC error: {:?}",
                 resp.error
             );
-            if tool_name == "dirgha_eval_run" {
+            if is_sidecar_tool && resp.error.is_some() {
                 assert!(resp.error.as_ref().unwrap()["message"].as_str().unwrap().contains("sidecar_"));
                 continue;
             }

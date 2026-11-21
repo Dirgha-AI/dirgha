@@ -11,6 +11,80 @@
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::fs;
+use std::io;
+#[cfg(unix)]
+use std::io::Read;
+use std::io::Write;
+use std::path::Path;
+
+fn fill_os_random_bytes(buffer: &mut [u8]) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        let mut source = fs::File::open("/dev/urandom")?;
+        source.read_exact(buffer)
+    }
+    #[cfg(windows)]
+    {
+        #[link(name = "bcrypt")]
+        unsafe extern "system" {
+            fn BCryptGenRandom(
+                algorithm: *mut std::ffi::c_void,
+                buffer: *mut u8,
+                length: u32,
+                flags: u32,
+            ) -> i32;
+        }
+        const BCRYPT_USE_SYSTEM_PREFERRED_RNG: u32 = 0x00000002;
+        let len: u32 = buffer
+            .len()
+            .try_into()
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "random buffer too large"))?;
+        let status = unsafe {
+            BCryptGenRandom(
+                std::ptr::null_mut(),
+                buffer.as_mut_ptr(),
+                len,
+                BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+            )
+        };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(io::Error::other(format!("BCryptGenRandom failed: 0x{status:08x}")))
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = buffer;
+        Err(io::Error::other("no supported operating-system CSPRNG"))
+    }
+}
+
+fn load_or_create_dtrack_signing_key() -> SigningKey {
+    let key_path = Path::new("data/keys/dtrack_cra_ed25519.key");
+    if let Ok(hex_str) = fs::read_to_string(key_path) {
+        if let Ok(bytes) = hex::decode(hex_str.trim()) {
+            if let Ok(arr) = <[u8; 32]>::try_from(bytes.as_slice()) {
+                return SigningKey::from_bytes(&arr);
+            }
+        }
+    }
+    let mut key_bytes = [0u8; 32];
+    fill_os_random_bytes(&mut key_bytes).expect("OS CSPRNG unavailable; refusing to sign CSAF attestation");
+    if let Some(parent) = key_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Ok(mut file) = fs::OpenOptions::new().write(true).create_new(true).open(key_path) {
+        let _ = file.write_all(hex::encode(key_bytes).as_bytes());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(key_path, fs::Permissions::from_mode(0o600));
+        }
+    }
+    SigningKey::from_bytes(&key_bytes)
+}
 
 /// Supported SBOM wire standards.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -223,8 +297,8 @@ pub fn generate_csaf_2_0_vex_attestation(
     );
     let attestation_blake3 = blake3::hash(material.as_bytes()).to_hex().to_string();
 
-    let key_digest = blake3::hash(format!("dtrack-rs-cra-signer-v3.1:{signing_seed}").as_bytes());
-    let signing_key = SigningKey::from_bytes(key_digest.as_bytes());
+    let _ = signing_seed;
+    let signing_key = load_or_create_dtrack_signing_key();
     let verifying_key = signing_key.verifying_key();
     let sig: Signature = signing_key.sign(attestation_blake3.as_bytes());
 
@@ -243,8 +317,8 @@ pub fn generate_csaf_2_0_vex_attestation(
 }
 
 impl CsafVexAttestation {
-    /// Verify the `BLAKE3` digest and `Ed25519` signature of the CSAF 2.0 / VEX attestation bundle.
-    pub fn verify_signature(&self) -> bool {
+    /// Verify the `BLAKE3` digest and `Ed25519` signature against an explicitly trusted verifying key.
+    pub fn verify_signature_with_trusted_key(&self, trusted_key: &VerifyingKey) -> bool {
         let comps_json = serde_json::to_string(&self.components).unwrap_or_default();
         let vex_json = serde_json::to_string(&self.vex_statements).unwrap_or_default();
         let material = format!(
@@ -255,6 +329,18 @@ impl CsafVexAttestation {
         if expected_hash != self.attestation_blake3 {
             return false;
         }
+        let Ok(sig_bytes) = hex::decode(&self.ed25519_sig_hex) else {
+            return false;
+        };
+        let Ok(sig_arr): Result<[u8; 64], _> = sig_bytes.try_into() else {
+            return false;
+        };
+        let sig = Signature::from_bytes(&sig_arr);
+        trusted_key.verify(self.attestation_blake3.as_bytes(), &sig).is_ok()
+    }
+
+    /// Verify the `BLAKE3` digest and `Ed25519` signature of the CSAF 2.0 / VEX attestation bundle.
+    pub fn verify_signature(&self) -> bool {
         let Ok(pk_bytes) = hex::decode(&self.ed25519_pubkey_hex) else {
             return false;
         };
@@ -264,14 +350,7 @@ impl CsafVexAttestation {
         let Ok(vk) = VerifyingKey::from_bytes(&pk_arr) else {
             return false;
         };
-        let Ok(sig_bytes) = hex::decode(&self.ed25519_sig_hex) else {
-            return false;
-        };
-        let Ok(sig_arr): Result<[u8; 64], _> = sig_bytes.try_into() else {
-            return false;
-        };
-        let sig = Signature::from_bytes(&sig_arr);
-        vk.verify(self.attestation_blake3.as_bytes(), &sig).is_ok()
+        self.verify_signature_with_trusted_key(&vk)
     }
 }
 

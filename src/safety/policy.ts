@@ -6,12 +6,13 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
   PermissionCheck,
   PermissionDecision,
 } from "../tools/permission.js";
+import { canonicalizePath } from "../utils/fs.js";
 
 // Minimal WebAssembly types. tsconfig uses lib es2022 without DOM, so the
 // global WebAssembly namespace is not typed; Node provides it at runtime.
@@ -26,6 +27,7 @@ export interface LokahiWasmSyncExports {
   memory: LokahiWasmMemory;
   lokahi_c_abi_evaluate_utf8: (ptr: number, len: number, isS2Critical: number) => number;
   lokahi_alloc?: (size: number) => number;
+  lokahi_free?: (ptr: number, size: number) => void;
   alloc?: (size: number) => number;
   malloc?: (size: number) => number;
 }
@@ -69,7 +71,6 @@ function getLokahiWasmSync(): LokahiWasmSyncExports | null {
   } catch {
     cachedLokahiSync = null;
     return null;
-
   }
 }
 
@@ -104,13 +105,23 @@ export function evaluateLokahiGateSync(
         ? { allowed: true, reason: "lokahi_gate_memory_unavailable_opt_out" }
         : { allowed: false, reason: "lokahi_gate_memory_unavailable" };
     }
-    new Uint8Array(wasm.memory.buffer, pointer, encoded.length).set(encoded);
-    const verdict = wasm.lokahi_c_abi_evaluate_utf8(pointer, encoded.length, isS2Critical ? 1 : 0);
-    if (verdict === 1) return { allowed: true, reason: "lokahi_gate_allow" };
-    if (verdict === 0) return { allowed: false, reason: "lokahi_gate_denied" };
-    return allowUngatedForDevelopment()
-      ? { allowed: true, reason: "lokahi_gate_unknown_opt_out" }
-      : { allowed: false, reason: "lokahi_gate_unavailable" };
+    try {
+      new Uint8Array(wasm.memory.buffer, pointer, encoded.length).set(encoded);
+      const verdict = wasm.lokahi_c_abi_evaluate_utf8(pointer, encoded.length, isS2Critical ? 1 : 0);
+      if (verdict === 1) return { allowed: true, reason: "lokahi_gate_allow" };
+      if (verdict === 0) return { allowed: false, reason: "lokahi_gate_denied" };
+      return allowUngatedForDevelopment()
+        ? { allowed: true, reason: "lokahi_gate_unknown_opt_out" }
+        : { allowed: false, reason: "lokahi_gate_unavailable" };
+    } finally {
+      if (allocator && typeof wasm.lokahi_free === "function") {
+        try {
+          wasm.lokahi_free(pointer, encoded.length);
+        } catch {
+          // ignore free errors
+        }
+      }
+    }
   } catch {
     return allowUngatedForDevelopment()
       ? { allowed: true, reason: "lokahi_gate_error_opt_out" }
@@ -203,12 +214,12 @@ export const DEFAULT_RULES: PolicyRule[] = [
 ];
 
 export function createPolicyEngine(opts: PolicyEngineOptions): PolicyEngine {
-  const cwd = resolve(opts.cwd);
+  const cwd = canonicalizePath(resolve(opts.cwd));
   const rules = [...(opts.rules ?? []), ...DEFAULT_RULES];
 
   const evaluate = (req: PermissionCheck): PermissionDecision => {
     // The WASM capability firewall is mandatory unless the explicit local-development opt-out is set.
-    const gate = evaluateLokahiGateSync(req.target, false);
+    const gate = evaluateLokahiGateSync(req.target, req.action === "delete");
     if (!gate.allowed && gate.reason !== "lokahi_gate_denied") {
       return { allowed: false, reason: gate.reason, requiresApproval: false };
     }
@@ -290,7 +301,8 @@ function decisionFor(rule: PolicyRule): PermissionDecision {
 
 function isInside(root: string, target: string, cwd: string): boolean {
   if (!target) return false;
-  const resolved = resolve(cwd, target);
-  const normRoot = root.replace(/\/+$/, "");
-  return resolved === normRoot || resolved.startsWith(`${normRoot}/`);
+  const resolved = canonicalizePath(resolve(cwd, target));
+  const normRoot = canonicalizePath(root);
+  const baseSep = normRoot.endsWith(sep) ? normRoot : normRoot + sep;
+  return resolved === normRoot || resolved.startsWith(baseSep);
 }

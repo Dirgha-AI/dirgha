@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "1.0",
+  "id": "sovereign-cloud-demo",
+  "name": "Sovereign Cloud GPU Starter",
+  "endpoint": "https://gpu.your-cloud-domain.example",
+  "authHeader": "Authorization",
+  "authScheme": "Bearer",
+  "authEnvVar": "SOVEREIGN_CLOUD_API_KEY",
+  "jurisdictions": ["IN", "EU"],
+  "catalogPath": "/v1/gpus",
+  "provisionPath": "/v1/instances",
+  "statusPath": "/v1/instances/{id}",
+  "logsPath": "/v1/instances/{id}/logs",
+  "destroyPath": "/v1/instances/{id}",
+  "contactEmail": "platform@your-cloud-domain.example",
+  "soc2Certified": true,
+  "iso27001Certified": true,
+  "dpdpCompliant": true,
+  "gdprCompliant": true
+}

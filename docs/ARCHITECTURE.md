@@ -1,68 +1,60 @@
-# dirgha-cli — Architecture
+# Dirgha 2.0 — Architecture
 
-A terminal coding agent that adapts to your workflow without forcing a fork. Headless one-shots, an Ink TUI, a readline REPL, parallel sub-agent fleets, DAG-chained sequential agents, and remote MCP servers all run on the same kernel + provider abstraction.
+A sovereign coding and physical-AI harness that adapts to your workflow without forcing governance overhead on solo developers. Headless one-shots, an Ink TUI, a readline REPL, parallel sub-agent fleets, DAG-chained sequential agents, remote MCP servers, Open GPU Cloud Market dispatch, and the Rust native kernel all run behind one launcher (`bin/dirgha.mjs`).
 
 ## Purpose
 
-Engineers ship working code. dirgha is a thin loop between an LLM and the filesystem / shell / git / browser, glued by audit-everything persistence so a long sprint survives context resets, network blips, and provider outages.
+Engineers ship working code and reliable autonomous systems. Dirgha pairs a fast TypeScript agent loop (`src/`) with a Rust micro-kernel (`crates/`, 24 MCP tools) and an optional WebAssembly safety gate (`lokahi_gate.wasm`). Solo developers default to `--profile developer` (zero governance friction), while teams and regulated enterprises enable LOKAHI enforcement, Arniko SARIF scanning, Ahimsa impact manifests, and immutable Org Policy Locks (`/etc/dirgha/policy.json`).
 
-It is **free-tier-first**: the same machinery runs on free OpenRouter `:free` models and on premium Claude / GPT / Gemini, with a 4-tier failover cascade that swaps a dead model for the next-live alternative without losing the partial transcript.
+It is **free-tier and local-first**: the same machinery runs on local Ollama / llama.cpp models, OpenRouter `:free` tiers, or enterprise BYOK endpoints, with a 4-tier failover cascade that swaps a failed model without losing the partial transcript.
 
-## Vision
+## Core Design Principles
 
-1. **One source of truth.** 104 tests pass in ~11 s. TypeScript 0 errors, ESLint 0 warnings. Every fix cites code + test in the SOTA scorecard.
-2. **Adapt to workflows; don't fork dirgha.** Skills, themes, hooks, MCP servers, and **TypeScript / ESM extensions** are loadable artifacts, not patches.
-3. **Every model. Every wire. Every transport.** OpenAI chat-completions, Anthropic messages, Gemini generate, MCP stdio, MCP HTTP/SSE — one factory, providers as config blobs.
-4. **Free-tier endpoints are first-class.** NVIDIA NIM (kimi/deepseek/qwen) and OpenRouter free models (hy3, ling) work end-to-end including multi-turn coding sprints — proven by dogfood runs.
-5. **Failover is multi-tier and lossless.** A 4-tier cascade (user → same-family → registry → free fallback) keeps the agent alive. Mid-session timeouts resume from the partial transcript. Stall detection aborts hung streams at 30s.
-6. **Multi-key BYOK with cooldown rotation.** A free-tier 429 cools that key out for the rate-limit window; the next-priority key takes over without restarting the CLI. 17 providers known. Health scoring with 60s TTL compaction.
-7. **Crash-safe persistence.** Append-only JSONL sessions replayed on `dirgha resume`. EPIPE/EIO crash guards suppress terminal-close noise. Crash log rotated at 10 MB. Audit log with `kinds` tally and `--filter`. Ledger with TF-IDF cosine search.
-8. **Every model has a soul.** A short Markdown file at `~/.dirgha/soul.md` (or the default that ships with the package) defines tone, boundaries, end-of-turn norms.
-9. **Self-update with permission.** `dirgha update --check` polls npm. `dirgha update [--yes]` installs after confirmation. Audit-logged.
-10. **Self-fetching catalogue.** `dirgha models refresh` queries `/v1/models` on each configured provider in parallel, caches at `~/.dirgha/models-cache.json` with a 24 h TTL.
+1. **Progressive governance (zero forced friction).** `developer` profile defaults to `lokahi: off`, `arniko: false`, `gpuMarket: true`. Teams opt in via `--profile team|enterprise|robotics` or lock policy fail-closed via `/etc/dirgha/policy.json`.
+2. **Fail-closed when enforced.** When LOKAHI is in `enforce` mode, `createToolExecutor` evaluates real tool payloads (shell command, file path, browser URL, git args, GPU jurisdiction/spend) through `lokahi_gate.wasm` and optional LOKAHI/Ahimsa manifests; missing or failing gates refuse execution.
+3. **Adapt to workflows; don't fork dirgha.** Skills, themes, hooks, MCP servers, **TypeScript / ESM extensions**, and **third-party GPU cloud providers** (`specs/GPU_PROVIDER_SCHEMA.json`) are loadable artifacts, not patches.
+4. **Every model. Every wire. Every transport.** OpenAI chat-completions, Anthropic messages, Gemini generate, MCP stdio, MCP HTTP/SSE — one factory, providers as config blobs.
+5. **Failover is multi-tier and lossless.** A 4-tier cascade (user → same-family → registry → free fallback) keeps the agent alive with mid-session transcript resume and stall abort.
+6. **Multi-key BYOK with cooldown rotation.** Rate-limited keys cool out automatically while the next-priority key takes over.
+7. **Crash-safe persistence & hardened boundaries.** Append-only JSONL sessions, symlink-safe workspace containment, fail-closed IPv6/DNS SSRF guard, OS-CSPRNG cryptographic keys, and strict sandbox fail-closed mode.
+8. **Honest execution.** Tools never fabricate passing audits, SAT dossiers, or scanner findings; demo tools explicitly mark `"simulated": true`.
 
-## What dirgha is
+## What Dirgha 2.0 Includes
 
-- **Terminal coding agent.** `dirgha "prompt"` (one-shot), `dirgha` (Ink TUI), `dirgha resume <id>` (continue session), `dirgha fleet launch <goal>` (parallel git-worktree sub-agents), `dirgha fleet dag "step1" "step2" "step3"` (sequential agent chaining), `dirgha verify "<goal>" --accept "<cmd>"` (gated agent loop).
-- **Multi-provider with one transport-abstraction.** Adding a new provider is a config-blob diff in `presets.ts`, not a new class.
-- **Tool surface:** `fs_read`, `fs_write`, `fs_edit`, `fs_ls`, `shell`, `search_grep`, `search_glob`, `git`, `browser`, `checkpoint`, `cron`, `task`. Per-tool timeout enforcement with configurable deadlines.
-- **MCP-aware** with stdio + HTTP/SSE transports and async `bearerProvider` for OAuth token rotation.
-- **20 slash commands** in interactive mode.
-- **18 subcommands** for headless workflows.
-- **Modes:** `act`, `plan`, `verify`, `ask`. Kernel-hook gate blocks every write tool in non-`act` modes.
-- **Config schema versioning** with migration hook — adding new fields never breaks old configs.
-- **Daemon mode** with graceful shutdown, AbortController-backed agent cancellation, and session flush.
+- **Terminal coding agent:** `dirgha "prompt"` (one-shot), `dirgha` (Ink TUI), `dirgha resume <id>`, `dirgha fleet launch <goal>`, `dirgha fleet dag ...`, `dirgha verify "<goal>" --accept "<cmd>"`.
+- **29 built-in tools:** `fs_read`, `fs_write`, `fs_edit`, `fs_ls`, `shell`, `search_grep`, `search_glob`, `git`, `github`, `browser`, `checkpoint`, `cron`, `task`, `gpu_compute`, LSP lookups, media/web tools, and MCP tools.
+- **37 CLI subcommands + 20 interactive slash commands** across `act`, `plan`, `verify`, and `ask` modes.
+- **Open GPU Cloud Market (`src/gpu/`):** Multi-cloud GPU orchestration (`dirgha gpu providers|certify|register|remove`) with SSRF-safe third-party provider certification, residency filtering, and hourly budget limits.
+- **Arniko & Ahimsa Bridges:** Opt-in `dirgha scan --sarif` security scanning (`gitleaks`, `semgrep`, `trivy`) and Ahimsa-to-LOKAHI manifest compilation.
+- **Rust Native Kernel (`crates/`):** 24 MCP tools, bearer-authenticated local Cockpit (`data/cockpit.html`), CycloneDX SBOM/OpenVEX (`dtrack-rs`), hash-chained ledger (`arniko-audit`), and MuJoCo robotics evaluation sidecar.
 
-## What dirgha is NOT (yet)
-
-- A web dashboard. `dirgha audit tail` is the live view; HTML rendering is on the roadmap.
-- Auto-updating without permission. Update is opt-in and prompts unless `--yes`.
-- Wired into npm marketplaces for plugin packs. Git-cloned skill packs work today; `dirgha install npm:@foo/pack` is roadmap.
-- OAuth-native for every provider. API-key BYOK + dirgha gateway device-code work today; per-provider OAuth (Anthropic Pro / ChatGPT Plus) is roadmap.
-- Distributed fleet execution. Fleet agents run on the local machine via git worktrees; multi-machine orchestration is roadmap.
-
-## Architecture
+## Directory Layout
 
 ```
+bin/
+└── dirgha.mjs        unified CLI launcher (TS agent + Rust kernel + doctor)
+crates/               Rust micro-kernel (lokahi-gate, dirgha-core, native-host, memory-mgp, dtrack-rs, arniko-audit, flywheel-engine, llm-router)
+specs/                JSON Schemas & Rust adapter traits (incl. GPU_PROVIDER_SCHEMA.json)
 src/
 ├── kernel/           agent loop, message types, event stream, projection
+├── safety/           modules-config, lokahi-runtime, policy (WASM gate), ahimsa-bridge
+├── security/         arniko-bridge (SARIF v2.1.0), skill scanner
+├── gpu/              Open GPU Cloud Market (RunPod/Modal/Lambda/Vast + third-party provider-spec)
 ├── providers/        wire transports + provider classes; rate-limit middleware
 ├── intelligence/     model catalogue, cost tracker, error classifier, models refresh
-├── auth/             keystore (legacy single-slot) + keypool (multi-key, cooldown) + providers (registry of 17)
+├── auth/             keystore + keypool (multi-key, cooldown) + providers registry
 ├── context/          soul, primer, git-state, mode, mode-enforcement, compaction, ledger, session
 ├── audit/            append-only JSONL writer + reader subcommand
 ├── extensions/       loadable plugin API (registerTool / registerSlash / registerSubcommand / on)
-├── tools/            registry + 11 built-ins + task tool subagent dispatcher
+├── tools/            registry + 29 built-in tools (incl. gpu_compute) + task subagent dispatcher
 ├── mcp/              client + stdio + HTTP/SSE transports + bearerProvider rotation
 ├── skills/           agentskills.io frontmatter loader + matcher + runtime
 ├── subagents/        delegator + pool for the `task` tool
 ├── fleet/            parallel git-worktree dispatch
 ├── hooks/            registry + AgentHooks shape + config-bridge
-├── cli/              entry points (one-shot main, REPL interactive, 18 subcommands, 20 slashes)
-└── tui/              Ink TUI with <Static> transcript + StatusBar (cost / tok-rate / context meter / mode badge)
+├── cli/              entry points (main, interactive, 37 subcommands, 20 slashes)
+└── tui/              Ink TUI with <Static> transcript + StatusBar
 ```
-
-**~14.5 K LOC** across 23 modules. Hard rule: every src file ≤ 200 lines.
 
 ## How a one-shot turn flows
 

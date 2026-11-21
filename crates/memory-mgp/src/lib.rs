@@ -168,23 +168,14 @@ pub struct OriginBoundVault {
 
 fn default_os_keychain_seed() -> String {
     let key_path = Path::new("data/keys/vault_master_aes256.key");
-    if let Ok(existing) = fs::read_to_string(key_path) {
-        let trimmed = existing.trim();
-        if trimmed.len() >= 32 {
-            return trimmed.to_string();
-        }
-    }
-    let seed_material = format!(
-        "dirgha-os-keychain-dpapi-master-v3.1:{:?}:{}",
-        std::env::current_dir().ok(),
-        std::env::consts::OS
-    );
-    let hex_key = blake3::hash(seed_material.as_bytes()).to_hex().to_string();
-    if let Some(parent) = key_path.parent() {
-        let _ = fs::create_dir_all(parent);
-        let _ = fs::write(key_path, &hex_key);
-    }
-    hex_key
+    let key_bytes = dirgha_core::load_or_create_persistent_key(key_path)
+        .or_else(|_| {
+            let mut ephemeral = [0u8; 32];
+            dirgha_core::fill_os_random_bytes(&mut ephemeral)?;
+            Ok::<[u8; 32], io::Error>(ephemeral)
+        })
+        .expect("OS CSPRNG unavailable; refusing to initialize vault master key");
+    hex::encode(key_bytes)
 }
 
 impl Default for OriginBoundVault {
@@ -207,13 +198,16 @@ impl OriginBoundVault {
     }
 
     fn derive_item_nonce(item_id: &str, bound_origin: &str) -> [u8; 12] {
+        let mut nonce = [0u8; 12];
+        if dirgha_core::fill_os_random_bytes(&mut nonce).is_ok() {
+            return nonce;
+        }
         let seq = VAULT_NONCE_COUNTER.fetch_add(1, Ordering::Relaxed);
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
         let digest = blake3::hash(format!("nonce-v3.1:{item_id}:{bound_origin}:{seq}:{nanos}").as_bytes());
-        let mut nonce = [0u8; 12];
         nonce.copy_from_slice(&digest.as_bytes()[..12]);
         nonce
     }

@@ -1,20 +1,23 @@
-name: Publish to npm
+name: Release Dirgha 2.0 (npm + Native Kernel + LOKAHI WASM)
 
-# Publishes @dirgha/code when a v2.x tag is pushed. Uses npm trusted
-# publishing (OIDC), so no npm token is stored in this repository, and
-# attaches a provenance statement to the package.
+# Publishes @dirgha/code via npm trusted publishing (OIDC) and builds
+# cross-platform Rust native-host binaries + lokahi_gate.wasm with SHA-256
+# checksums attached to the GitHub Release when a v2.x tag is pushed.
 on:
   push:
     tags: ["v2.*"]
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
-  publish:
+  publish-npm:
+    name: Publish @dirgha/code to npm
     runs-on: ubuntu-latest
     environment: npm
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -26,7 +29,7 @@ jobs:
       - name: Use npm 11 (trusted publishing and the lock file need it)
         run: npm install -g npm@11
 
-      - name: Tag matches package.json version
+      - name: Verify tag matches package.json version
         run: |
           TAG="${GITHUB_REF#refs/tags/v}"
           PKG="$(node -p "require('./package.json').version")"
@@ -38,5 +41,106 @@ jobs:
       - run: npx vitest run --dir src
       - run: node --test ./bin/dirgha.test.mjs
 
-      - name: Publish
+      - name: Publish with OIDC provenance
         run: npm publish --provenance --access public
+
+  build-native:
+    name: Build Rust Kernel (${{ matrix.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: linux-x64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            ext: ""
+          - label: macos-arm64
+            os: macos-14
+            target: aarch64-apple-darwin
+            ext: ""
+          - label: windows-x64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            ext: ".exe"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Run Rust workspace test suite
+        run: cargo test --workspace
+
+      - name: Build release native-host binary
+        run: cargo build --release --target ${{ matrix.target }} -p native-host
+
+      - name: Package binary and SHA-256 checksum
+        shell: bash
+        run: |
+          mkdir -p release-artifacts
+          SRC="target/${{ matrix.target }}/release/dirgha-native-host${{ matrix.ext }}"
+          OUT="release-artifacts/dirgha-native-host-${{ matrix.label }}${{ matrix.ext }}"
+          cp "$SRC" "$OUT"
+          if command -v sha256sum >/dev/null 2>&1; then
+            (cd release-artifacts && sha256sum "$(basename "$OUT")" > "$(basename "$OUT").sha256")
+          else
+            (cd release-artifacts && shasum -a 256 "$(basename "$OUT")" > "$(basename "$OUT").sha256")
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dirgha-native-host-${{ matrix.label }}
+          path: release-artifacts/*
+
+  build-wasm:
+    name: Build LOKAHI Gate WASM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Build lokahi_gate.wasm
+        run: cargo build --release --target wasm32-unknown-unknown -p lokahi-gate
+
+      - name: Stage lokahi_gate.wasm and checksum
+        run: |
+          mkdir -p release-artifacts
+          cp target/wasm32-unknown-unknown/release/lokahi_gate.wasm release-artifacts/lokahi_gate.wasm
+          (cd release-artifacts && sha256sum lokahi_gate.wasm > lokahi_gate.wasm.sha256)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lokahi-gate-wasm
+          path: release-artifacts/*
+
+  github-release:
+    name: Create GitHub Release with Signed Checksums
+    needs: [publish-npm, build-native, build-wasm]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: all-artifacts
+          merge-multiple: true
+
+      - name: Combine SHA-256 manifest
+        run: |
+          cd all-artifacts
+          cat *.sha256 > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG_NAME" all-artifacts/* \
+            --title "Dirgha $TAG_NAME" \
+            --generate-notes

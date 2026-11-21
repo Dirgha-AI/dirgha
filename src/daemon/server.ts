@@ -27,6 +27,7 @@ import { runAgentLoop } from "../kernel/agent-loop.js";
 import type { ProviderRegistry } from "../providers/index.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import { createToolExecutor } from "../tools/exec.js";
+import { createRuntimePermissionEngine } from "../safety/lokahi-runtime.js";
 import type { SessionStore, Session } from "../context/session.js";
 import type { DirghaConfig } from "../cli/config.js";
 
@@ -267,10 +268,16 @@ export class DaemonServer {
     });
 
     const provider = this.opts.providers.forModel(this.opts.config.model);
+    const permission = createRuntimePermissionEngine({
+      cwd: this.opts.cwd,
+      modules: this.opts.config.modules,
+    });
     const executor = createToolExecutor({
       registry: this.opts.registry,
       cwd: this.opts.cwd,
       sessionId: params.sessionId,
+      permission,
+      sandboxMode: this.opts.config.sandbox ?? "off",
     });
     const sanitized = this.opts.registry.sanitize({ descriptionLimit: 200 });
 

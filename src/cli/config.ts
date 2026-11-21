@@ -10,6 +10,13 @@ import { homedir } from "node:os";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { migrateDeprecatedModel } from "../intelligence/prices.js";
+import {
+  DEFAULT_MODULES_CONFIG,
+  isValidLokahiMode,
+  isValidProfile,
+  type DirghaProfile,
+  type ModulesConfig,
+} from "../safety/modules-config.js";
 
 export interface DirghaConfig {
   /** Config schema version. Bumped on breaking changes. Current: 1. */
@@ -169,6 +176,16 @@ export interface DirghaConfig {
    * `DIRGHA_EMBEDDINGS_TOKEN` env var.
    */
   embeddingsBearerToken?: string;
+  /**
+   * Stack profile controlling default toggles for LOKAHI, Arniko, Ahimsa,
+   * and GPU Cloud Market. Defaults to `developer` (zero governance friction).
+   */
+  profile?: DirghaProfile;
+  /**
+   * Per-module toggles (LOKAHI gate, Arniko scanner, Ahimsa bridge, GPU Cloud Market).
+   * Can be overridden by CLI flags unless locked by /etc/dirgha/policy.json.
+   */
+  modules?: ModulesConfig;
 }
 
 const CURRENT_SCHEMA = 1;
@@ -188,6 +205,8 @@ export const DEFAULT_CONFIG: DirghaConfig = {
   kbAutoInject: true,
   alternateBuffer: false,
   sandbox: "off",
+  profile: "developer",
+  modules: structuredClone(DEFAULT_MODULES_CONFIG),
 };
 
 // ── Trust store for project-level config ──────────────────────────────
@@ -383,6 +402,29 @@ function readEnvOverrides(): Partial<DirghaConfig> {
   if (process.env.DIRGHA_EMBEDDINGS_TOKEN) {
     out.embeddingsBearerToken = process.env.DIRGHA_EMBEDDINGS_TOKEN;
   }
+  if (isValidProfile(process.env.DIRGHA_PROFILE)) {
+    out.profile = process.env.DIRGHA_PROFILE;
+  }
+  const modOverrides: Partial<ModulesConfig> = {};
+  if (isValidLokahiMode(process.env.DIRGHA_LOKAHI_MODE)) {
+    modOverrides.lokahi = {
+      ...DEFAULT_MODULES_CONFIG.lokahi,
+      mode: process.env.DIRGHA_LOKAHI_MODE,
+    };
+  }
+  if (process.env.DIRGHA_ARNIKO === "1" || process.env.DIRGHA_ARNIKO === "true") {
+    modOverrides.arniko = { ...DEFAULT_MODULES_CONFIG.arniko, enabled: true };
+  } else if (process.env.DIRGHA_ARNIKO === "0" || process.env.DIRGHA_ARNIKO === "false") {
+    modOverrides.arniko = { ...DEFAULT_MODULES_CONFIG.arniko, enabled: false };
+  }
+  if (process.env.DIRGHA_GPU_MARKET === "0" || process.env.DIRGHA_GPU_MARKET === "false") {
+    modOverrides.gpuMarket = { ...DEFAULT_MODULES_CONFIG.gpuMarket, enabled: false };
+  } else if (process.env.DIRGHA_GPU_MARKET === "1" || process.env.DIRGHA_GPU_MARKET === "true") {
+    modOverrides.gpuMarket = { ...DEFAULT_MODULES_CONFIG.gpuMarket, enabled: true };
+  }
+  if (Object.keys(modOverrides).length > 0) {
+    out.modules = modOverrides as ModulesConfig;
+  }
   return out;
 }
 
@@ -394,7 +436,16 @@ function merge(...partials: Array<Partial<DirghaConfig>>): DirghaConfig {
     for (const key of Object.keys(p) as Array<keyof DirghaConfig>) {
       const value = p[key];
       if (value === undefined) continue;
-      if (
+      if (key === "modules" && typeof value === "object" && value !== null) {
+        const cur = out.modules ?? structuredClone(DEFAULT_MODULES_CONFIG);
+        const incoming = value as Partial<ModulesConfig>;
+        out.modules = {
+          lokahi: { ...cur.lokahi, ...(incoming.lokahi ?? {}) },
+          arniko: { ...cur.arniko, ...(incoming.arniko ?? {}) },
+          ahimsa: { ...cur.ahimsa, ...(incoming.ahimsa ?? {}) },
+          gpuMarket: { ...cur.gpuMarket, ...(incoming.gpuMarket ?? {}) },
+        };
+      } else if (
         arrayFields.has(key) &&
         Array.isArray(value) &&
         Array.isArray(out[key])

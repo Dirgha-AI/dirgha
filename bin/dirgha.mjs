@@ -95,14 +95,22 @@ export async function runWasmSelfCheck() {
 
   // Verify C-ABI (`lokahi_c_abi_evaluate_utf8`) blocks `rm -rf /` (0) and allows safe read (1)
   const enc = new TextEncoder();
-  const scratch = 65536;
-  const badBytes = enc.encode("sudo rm -fr /");
-  new Uint8Array(exports.memory.buffer, scratch, badBytes.length).set(badBytes);
-  const badVerdict = exports.lokahi_c_abi_evaluate_utf8(scratch, badBytes.length, 0);
-
-  const goodBytes = enc.encode("cargo test --workspace");
-  new Uint8Array(exports.memory.buffer, scratch, goodBytes.length).set(goodBytes);
-  const goodVerdict = exports.lokahi_c_abi_evaluate_utf8(scratch, goodBytes.length, 0);
+  const evalUtf8 = (text) => {
+    const payload = enc.encode(text);
+    const hasAlloc =
+      typeof exports.lokahi_alloc === "function" && typeof exports.lokahi_free === "function";
+    const ptr = hasAlloc ? exports.lokahi_alloc(payload.length) : 65536;
+    try {
+      new Uint8Array(exports.memory.buffer, ptr, payload.length).set(payload);
+      return exports.lokahi_c_abi_evaluate_utf8(ptr, payload.length, 0);
+    } finally {
+      if (hasAlloc && ptr > 0) {
+        exports.lokahi_free(ptr, payload.length);
+      }
+    }
+  };
+  const badVerdict = evalUtf8("sudo rm -fr /");
+  const goodVerdict = evalUtf8("cargo test --workspace");
 
   return {
     wasmFound: true,
@@ -114,36 +122,57 @@ export async function runWasmSelfCheck() {
 }
 
 /**
- * Execute `dirgha doctor` combining v2.0 Sovereign Kernel + WASM + 235-provider diagnostics
- * and v1.43.3 coding CLI status.
+ * Discover authenticated Dirgha providers from `~/.dirgha/keys.json` and environment variables.
+ * Never reads third-party tool caches or credential files.
+ */
+function discoverAuthenticatedProviders() {
+  const providers = new Set(["ollama-local-gguf"]);
+  const keysPath = path.join(os.homedir(), ".dirgha", "keys.json");
+  if (fs.existsSync(keysPath)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(keysPath, "utf8"));
+      if (parsed && typeof parsed === "object") {
+        for (const [key, val] of Object.entries(parsed)) {
+          if (typeof val === "string" && val.trim().length > 0) {
+            providers.add(key.toLowerCase().replace(/_api_key$/, ""));
+          }
+        }
+      }
+    } catch {
+      // ignore unreadable keystore
+    }
+  }
+  const envMap = [
+    ["OPENROUTER_API_KEY", "openrouter"],
+    ["ANTHROPIC_API_KEY", "anthropic"],
+    ["OPENAI_API_KEY", "openai"],
+    ["GEMINI_API_KEY", "gemini"],
+    ["NVIDIA_API_KEY", "nvidia-nim"],
+    ["DEEPSEEK_API_KEY", "deepseek"],
+    ["GROQ_API_KEY", "groq"],
+    ["MISTRAL_API_KEY", "mistral"],
+    ["FIREWORKS_API_KEY", "fireworks"],
+    ["TOGETHER_API_KEY", "together"],
+    ["XAI_API_KEY", "xai"],
+  ];
+  for (const [envName, label] of envMap) {
+    if (process.env[envName] && process.env[envName].trim().length > 0) {
+      providers.add(label);
+    }
+  }
+  return Array.from(providers);
+}
+
+/**
+ * Execute `dirgha doctor` combining v2.0 Sovereign Kernel + WASM + provider diagnostics
+ * and TypeScript coding CLI status.
  */
 export async function runDoctor() {
   const wasmCheck = await runWasmSelfCheck();
   const nativeBin = resolveNativeBinary();
   const nativeSizeBytes = nativeBin ? fs.statSync(nativeBin).size : null;
   const v1DistPresent = fs.existsSync(path.join(rootDir, "dist", "cli", "main.js"));
-
-  const opencodeModelsPath = path.join(os.homedir(), ".cache", "opencode", "models.json");
-  const opencodeAuthPath = path.join(os.homedir(), ".local", "share", "opencode", "auth.json");
-  let discoveredProviders = 38;
-  if (fs.existsSync(opencodeModelsPath)) {
-    try {
-      const parsed = JSON.parse(fs.readFileSync(opencodeModelsPath, "utf8"));
-      discoveredProviders = Object.keys(parsed).length;
-    } catch {
-      // keep default
-    }
-  }
-
-  let authenticatedProviders = ["ollama-local-gguf"];
-  if (fs.existsSync(opencodeAuthPath)) {
-    try {
-      const auth = JSON.parse(fs.readFileSync(opencodeAuthPath, "utf8"));
-      authenticatedProviders.push(...Object.keys(auth));
-    } catch {
-      // keep default
-    }
-  }
+  const authenticatedProviders = discoverAuthenticatedProviders();
 
   const report = {
     status: wasmCheck.redTeamPassed === 50 && wasmCheck.cAbiVerified ? "HEALTHY" : "DEGRADED",
@@ -153,7 +182,7 @@ export async function runDoctor() {
     node_version: process.version,
     v1_coding_cli_integrated: v1DistPresent,
     v1_subcommands_count: 38,
-    v1_builtin_tools_count: 18,
+    v1_builtin_tools_count: 29,
     lokahi_wasm_gate: {
       present: wasmCheck.wasmFound,
       size_kb: wasmCheck.wasmSizeBytes ? Number((wasmCheck.wasmSizeBytes / 1024).toFixed(1)) : 0,
@@ -169,7 +198,7 @@ export async function runDoctor() {
       mcp_tools_count: 24,
     },
     provider_router: {
-      opencode_catalog_providers: discoveredProviders,
+      dirgha_catalog_providers: 38,
       authenticated_providers: authenticatedProviders,
     },
   };
@@ -203,25 +232,44 @@ async function main() {
       });
       process.exit(res.status ?? 0);
     }
-    const wasmCheck = await runWasmSelfCheck();
-    console.log(
+    if (cmd === "--self-test") {
+      const wasmCheck = await runWasmSelfCheck();
+      const passed = wasmCheck.redTeamPassed === 50 && wasmCheck.cAbiVerified;
+      console.log(
+        JSON.stringify(
+          {
+            status: passed ? "PASS" : "FAIL",
+            mode: "PORTABLE_WASM_FALLBACK",
+            version: "2.0.0",
+            lokahi_50_red_team: `${wasmCheck.redTeamPassed}/50 PASS`,
+            c_abi_verified: wasmCheck.cAbiVerified,
+            native_host_present: false,
+          },
+          null,
+          2
+        )
+      );
+      if (!passed) process.exit(1);
+      return;
+    }
+    console.error(
       JSON.stringify(
         {
-          status: wasmCheck.redTeamPassed === 50 ? "PASS" : "FAIL",
-          mode: "PORTABLE_WASM_FALLBACK",
-          version: "2.0.0",
-          lokahi_50_red_team: `${wasmCheck.redTeamPassed}/50 PASS`,
-          c_abi_verified: wasmCheck.cAbiVerified,
+          status: "ERROR",
+          reason: "native_host_missing",
+          command: cmd,
+          message: `The Rust kernel binary (dirgha-native-host) is required for '${cmd}' but is not built.`,
+          remediation: "Run: npm run build:native (requires Rust toolchain: https://rustup.rs)",
         },
         null,
         2
       )
     );
-    return;
+    process.exit(1);
   }
 
-  // Route all 38 v1 coding subcommands (`ask`, `chat`, `fleet`, `orchestra`, `hardware`, `status`,
-  // `kb`, `skills`, `models`, `keys`, `setup`, `web`, etc.) and interactive TUI/REPL to `dist/cli/main.js`
+  // Route all coding subcommands (`ask`, `chat`, `fleet`, `orchestra`, `hardware`, `gpu`, `scan`,
+  // `status`, `kb`, `skills`, `models`, `keys`, `setup`, `web`, etc.) and interactive TUI/REPL to `dist/cli/main.js`
   const v1MainPath = path.join(rootDir, "dist", "cli", "main.js");
   if (fs.existsSync(v1MainPath)) {
     await import(pathToFileURL(v1MainPath).href);

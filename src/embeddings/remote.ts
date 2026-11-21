@@ -11,7 +11,10 @@
  */
 
 import type { EmbeddingAdapter } from "./iface.js";
-import { assertSafeFetchUrlAsync } from "../utils/url-guard.js";
+import {
+  assertSafeFetchUrlAsync,
+  type DnsLookupFn,
+} from "../utils/url-guard.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -23,6 +26,8 @@ export interface RemoteEmbedderOptions {
   timeoutMs?: number;
   /** Override fetch (testing). */
   fetchImpl?: typeof fetch;
+  /** Override DNS lookup (testing). */
+  lookupFn?: DnsLookupFn;
 }
 
 interface RemoteResponse {
@@ -35,6 +40,7 @@ export class RemoteEmbedder implements EmbeddingAdapter {
   private readonly bearerToken: string | undefined;
   private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch;
+  private readonly lookupFn: DnsLookupFn | undefined;
 
   constructor(opts: RemoteEmbedderOptions) {
     if (!opts.endpoint || typeof opts.endpoint !== "string") {
@@ -44,6 +50,7 @@ export class RemoteEmbedder implements EmbeddingAdapter {
     this.bearerToken = opts.bearerToken;
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.fetchImpl = opts.fetchImpl ?? globalThis.fetch;
+    this.lookupFn = opts.lookupFn;
   }
 
   async available(): Promise<boolean> {
@@ -69,7 +76,10 @@ export class RemoteEmbedder implements EmbeddingAdapter {
       if (this.bearerToken) {
         headers["Authorization"] = `Bearer ${this.bearerToken}`;
       }
-      await assertSafeFetchUrlAsync(this.endpoint);
+      await assertSafeFetchUrlAsync(
+        this.endpoint,
+        this.lookupFn ? { lookupFn: this.lookupFn } : undefined,
+      );
       const res = await this.fetchImpl(this.endpoint, {
         method: "POST",
         headers,

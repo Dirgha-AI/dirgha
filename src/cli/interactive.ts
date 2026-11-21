@@ -15,6 +15,7 @@ import { runAgentLoop } from "../kernel/agent-loop.js";
 import type { ProviderRegistry } from "../providers/index.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import { createToolExecutor } from "../tools/exec.js";
+import { createRuntimePermissionEngine } from "../safety/lokahi-runtime.js";
 import { renderStreamingEvents } from "../tui/renderer.js";
 import { getTheme, style, type Theme, type ThemeName } from "../tui/theme.js";
 import { createTuiApprovalBus } from "../tui/approval.js";
@@ -362,10 +363,18 @@ export async function runInteractive(opts: InteractiveOptions): Promise<void> {
 
       const initialCount = history.length;
 
+      const permission = createRuntimePermissionEngine({
+        cwd: opts.cwd,
+        modules: opts.config.modules,
+        onAdvisory: (msg) => {
+          process.stderr.write(`${msg}\n`);
+        },
+      });
       const executor = createToolExecutor({
         registry: opts.registry,
         cwd: opts.cwd,
         sessionId,
+        permission,
         sandboxMode: currentSandboxMode,
       });
       const sanitized = opts.registry.sanitize({ descriptionLimit: 200 });

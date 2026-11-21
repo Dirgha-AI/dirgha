@@ -42,18 +42,37 @@ async function getLokahiWasmExports() {
 
 /**
  * Evaluate a UTF-8 command/URL payload locally in `<1 ms` using `lokahi_gate.wasm`.
+ * Fails closed (`false`) if WASM is missing, throws, or returns an unknown verdict.
  */
 async function evaluateLocalWasmGate(payload, isS2Critical = false) {
-  const exports = await getLokahiWasmExports();
-  if (!exports || !exports.lokahi_c_abi_evaluate_utf8 || !exports.memory) {
-    return null;
+  try {
+    const exports = await getLokahiWasmExports();
+    if (!exports || typeof exports.lokahi_c_abi_evaluate_utf8 !== "function" || !exports.memory) {
+      return false;
+    }
+    const encoded = new TextEncoder().encode(payload);
+    const alloc = exports.lokahi_alloc || exports.alloc || exports.malloc;
+    const ptr = typeof alloc === "function" ? alloc(encoded.length) : 65536;
+    if (!Number.isInteger(ptr) || ptr < 0 || ptr + encoded.length > exports.memory.buffer.byteLength) {
+      return false;
+    }
+    try {
+      const view = new Uint8Array(exports.memory.buffer, ptr, encoded.length);
+      view.set(encoded);
+      const code = exports.lokahi_c_abi_evaluate_utf8(ptr, encoded.length, isS2Critical ? 1 : 0);
+      return code === 1;
+    } finally {
+      if (typeof alloc === "function" && typeof exports.lokahi_free === "function") {
+        try {
+          exports.lokahi_free(ptr, encoded.length);
+        } catch (_e) {
+          // ignore free error
+        }
+      }
+    }
+  } catch (_err) {
+    return false;
   }
-  const encoded = new TextEncoder().encode(payload);
-  const scratchOffset = 65536;
-  const view = new Uint8Array(exports.memory.buffer, scratchOffset, encoded.length);
-  view.set(encoded);
-  const code = exports.lokahi_c_abi_evaluate_utf8(scratchOffset, encoded.length, isS2Critical ? 1 : 0);
-  return code === 1;
 }
 
 /**

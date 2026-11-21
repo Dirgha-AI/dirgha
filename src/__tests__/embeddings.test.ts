@@ -34,6 +34,8 @@ function makeCtx() {
   };
 }
 
+const publicLookup = async () => [{ address: "93.184.216.34", family: 4 }];
+
 describe("RemoteEmbedder", () => {
   test("POSTs texts and returns vectors verbatim", async () => {
     const fixedVector = new Array(EMBEDDING_DIM).fill(0.5);
@@ -48,6 +50,7 @@ describe("RemoteEmbedder", () => {
       endpoint: "https://example.test/embed",
       bearerToken: "secret-token",
       fetchImpl: fakeFetch as unknown as typeof fetch,
+      lookupFn: publicLookup,
     });
 
     expect(await adapter.available()).toBe(true);
@@ -80,6 +83,7 @@ describe("RemoteEmbedder", () => {
     const adapter = new RemoteEmbedder({
       endpoint: "https://example.test/embed",
       fetchImpl: fakeFetch as unknown as typeof fetch,
+      lookupFn: publicLookup,
     });
 
     await expect(adapter.embed(["x"])).rejects.toThrow(/400/);
@@ -92,6 +96,7 @@ describe("RemoteEmbedder", () => {
     const adapter = new RemoteEmbedder({
       endpoint: "https://example.test/embed",
       fetchImpl: fakeFetch as unknown as typeof fetch,
+      lookupFn: publicLookup,
     });
 
     try {
@@ -114,6 +119,7 @@ describe("RemoteEmbedder", () => {
     const adapter = new RemoteEmbedder({
       endpoint: "https://example.test/embed",
       fetchImpl: fakeFetch as unknown as typeof fetch,
+      lookupFn: publicLookup,
     });
     await expect(adapter.embed(["a", "b"])).rejects.toThrow(/mismatch/);
   });
@@ -123,6 +129,7 @@ describe("RemoteEmbedder", () => {
     const adapter = new RemoteEmbedder({
       endpoint: "https://example.test/embed",
       fetchImpl: fakeFetch as unknown as typeof fetch,
+      lookupFn: publicLookup,
     });
     expect(await adapter.embed([])).toEqual([]);
     expect(fakeFetch).not.toHaveBeenCalled();

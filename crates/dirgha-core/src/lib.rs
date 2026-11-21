@@ -8,7 +8,100 @@
 
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
+use std::fs;
+use std::io;
+#[cfg(unix)]
+use std::io::Read;
+use std::io::Write;
+use std::path::Path;
 use thiserror::Error;
+
+/// Fill a buffer with cryptographically secure random bytes from the OS CSPRNG.
+pub fn fill_os_random_bytes(buffer: &mut [u8]) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        let mut source = fs::File::open("/dev/urandom")?;
+        source.read_exact(buffer)
+    }
+    #[cfg(windows)]
+    {
+        #[link(name = "bcrypt")]
+        unsafe extern "system" {
+            fn BCryptGenRandom(
+                algorithm: *mut std::ffi::c_void,
+                buffer: *mut u8,
+                length: u32,
+                flags: u32,
+            ) -> i32;
+        }
+        const BCRYPT_USE_SYSTEM_PREFERRED_RNG: u32 = 0x00000002;
+        let len: u32 = buffer
+            .len()
+            .try_into()
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "random buffer too large"))?;
+        let status = unsafe {
+            BCryptGenRandom(
+                std::ptr::null_mut(),
+                buffer.as_mut_ptr(),
+                len,
+                BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+            )
+        };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(io::Error::other(format!(
+                "BCryptGenRandom failed: 0x{status:08x}"
+            )))
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = buffer;
+        Err(io::Error::other("no supported operating-system CSPRNG"))
+    }
+}
+
+/// Load a persisted 32-byte key from `path` or generate a fresh one from the OS CSPRNG,
+/// persisting atomically with `0o600` permissions on Unix.
+pub fn load_or_create_persistent_key(path: &Path) -> io::Result<[u8; 32]> {
+    if let Ok(hex_str) = fs::read_to_string(path) {
+        let bytes = hex::decode(hex_str.trim())
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+        let arr: [u8; 32] = bytes
+            .try_into()
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "persisted key must be 32 bytes"))?;
+        return Ok(arr);
+    }
+    let mut key = [0u8; 32];
+    fill_os_random_bytes(&mut key)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    match options.open(path) {
+        Ok(mut file) => {
+            file.write_all(hex::encode(key).as_bytes())?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+            }
+            Ok(key)
+        }
+        Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {
+            let hex_str = fs::read_to_string(path)?;
+            let bytes = hex::decode(hex_str.trim())
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+            let arr: [u8; 32] = bytes
+                .try_into()
+                .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "persisted key must be 32 bytes"))?;
+            Ok(arr)
+        }
+        Err(err) => Err(err),
+    }
+}
 
 /// Unified Safety Classification spanning Software/Web and Physical AI (`final/`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -607,8 +700,16 @@ impl SiteAcceptanceDossier {
         );
         let dossier_blake3 = blake3::hash(material.as_bytes()).to_hex().to_string();
 
-        let key_digest = blake3::hash(format!("dirgha-sat-dossier-ed25519:{signing_seed}").as_bytes());
-        let signing_key = SigningKey::from_bytes(key_digest.as_bytes());
+        // Use an OS-CSPRNG persisted host key instead of deriving Ed25519 keys from a static seed string.
+        let _ = signing_seed;
+        let key_bytes = load_or_create_persistent_key(Path::new("data/keys/sat_dossier_ed25519.key"))
+            .or_else(|_| {
+                let mut ephemeral = [0u8; 32];
+                fill_os_random_bytes(&mut ephemeral)?;
+                Ok::<[u8; 32], io::Error>(ephemeral)
+            })
+            .expect("OS CSPRNG unavailable; refusing to sign Site Acceptance Dossier");
+        let signing_key = SigningKey::from_bytes(&key_bytes);
         let verifying_key = signing_key.verifying_key();
         let sig: Signature = signing_key.sign(dossier_blake3.as_bytes());
 
@@ -630,8 +731,8 @@ impl SiteAcceptanceDossier {
         }
     }
 
-    /// Verify the `BLAKE3` digest and `Ed25519` signature of the Site Acceptance Dossier.
-    pub fn verify_signature(&self) -> bool {
+    /// Verify the `BLAKE3` digest and `Ed25519` signature against an explicitly trusted verifying key.
+    pub fn verify_signature_with_trusted_key(&self, trusted_key: &VerifyingKey) -> bool {
         let sc_json = serde_json::to_string(&self.scenarios).unwrap_or_default();
         let material = format!(
             "SAT-DOSSIER:{}:{}:{}:{}:{}:{}:{}:{}",
@@ -648,6 +749,18 @@ impl SiteAcceptanceDossier {
         if expected_hash != self.dossier_blake3 {
             return false;
         }
+        let Ok(sig_bytes) = hex::decode(&self.ed25519_sig_hex) else {
+            return false;
+        };
+        let Ok(sig_arr): Result<[u8; 64], _> = sig_bytes.try_into() else {
+            return false;
+        };
+        let sig = Signature::from_bytes(&sig_arr);
+        trusted_key.verify(self.dossier_blake3.as_bytes(), &sig).is_ok()
+    }
+
+    /// Verify the `BLAKE3` digest and `Ed25519` signature of the Site Acceptance Dossier.
+    pub fn verify_signature(&self) -> bool {
         let Ok(pk_bytes) = hex::decode(&self.ed25519_pubkey_hex) else {
             return false;
         };
@@ -657,14 +770,7 @@ impl SiteAcceptanceDossier {
         let Ok(vk) = VerifyingKey::from_bytes(&pk_arr) else {
             return false;
         };
-        let Ok(sig_bytes) = hex::decode(&self.ed25519_sig_hex) else {
-            return false;
-        };
-        let Ok(sig_arr): Result<[u8; 64], _> = sig_bytes.try_into() else {
-            return false;
-        };
-        let sig = Signature::from_bytes(&sig_arr);
-        vk.verify(self.dossier_blake3.as_bytes(), &sig).is_ok()
+        self.verify_signature_with_trusted_key(&vk)
     }
 
     /// Render a customer-ready Markdown Site Acceptance Testing (SAT) Sign-Off Report (`$3K–$7K` Integrator Wedge).

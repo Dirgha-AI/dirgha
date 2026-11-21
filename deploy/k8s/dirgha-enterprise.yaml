@@ -1,0 +1,216 @@
+# Dirgha 2.0 Enterprise Sovereign Stack — Kubernetes Deployment Manifests
+#
+# Deploys:
+#   1. Namespace `dirgha-enterprise`
+#   2. Read-only Organization Policy Lock ConfigMap mounted at `/etc/dirgha/policy.json`
+#   3. Non-root, read-only-root-filesystem Dirgha 2.0 Control Plane Deployment
+#   4. Internal ClusterIP Service (port 3000)
+#   5. Scheduled Arniko SARIF Security Audit CronJob
+#
+# Zero hardcoded secrets: create the Kubernetes Secret `dirgha-provider-secrets`
+# out of band (or via External Secrets Operator / Vault) before applying.
+#
+# Licensed under the Apache License, Version 2.0.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dirgha-enterprise
+  labels:
+    app.kubernetes.io/part-of: dirgha-enterprise-stack
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dirgha-org-policy
+  namespace: dirgha-enterprise
+data:
+  policy.json: |
+    {
+      "orgName": "enterprise-sovereign-cluster",
+      "locked": true,
+      "minLokahiMode": "enforce",
+      "requireArniko": true,
+      "allowedJurisdictions": ["EU", "IN", "US"],
+      "maxGpuBudgetUsd": 250
+    }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dirgha-control-plane
+  namespace: dirgha-enterprise
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dirgha-control-plane
+  namespace: dirgha-enterprise
+  labels:
+    app.kubernetes.io/name: dirgha-control-plane
+    app.kubernetes.io/version: "2.0.0"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dirgha-control-plane
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dirgha-control-plane
+    spec:
+      serviceAccountName: dirgha-control-plane
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: dirgha
+          image: ghcr.io/dirgha-ai/dirgha-code:2.0.0
+          imagePullPolicy: IfNotPresent
+          command: ["node", "scripts/dev-server.mjs"]
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          env:
+            - name: PORT
+              value: "3000"
+            - name: HOST
+              value: "0.0.0.0"
+            - name: DIRGHA_PROFILE
+              value: "enterprise"
+            - name: DIRGHA_ORG_POLICY
+              value: "/etc/dirgha/policy.json"
+            - name: HOME
+              value: "/tmp/dirgha-home"
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: dirgha-provider-secrets
+                  key: OPENAI_API_KEY
+                  optional: true
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: dirgha-provider-secrets
+                  key: ANTHROPIC_API_KEY
+                  optional: true
+            - name: RUNPOD_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: dirgha-provider-secrets
+                  key: RUNPOD_API_KEY
+                  optional: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: org-policy
+              mountPath: /etc/dirgha
+              readOnly: true
+            - name: tmp-home
+              mountPath: /tmp
+      volumes:
+        - name: org-policy
+          configMap:
+            name: dirgha-org-policy
+            defaultMode: 0444
+        - name: tmp-home
+          emptyDir:
+            sizeLimit: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dirgha-control-plane
+  namespace: dirgha-enterprise
+  labels:
+    app.kubernetes.io/name: dirgha-control-plane
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: dirgha-control-plane
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dirgha-arniko-sarif-audit
+  namespace: dirgha-enterprise
+spec:
+  schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: dirgha-control-plane
+          automountServiceAccountToken: false
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: arniko-audit
+              image: ghcr.io/dirgha-ai/dirgha-code:2.0.0
+              command: ["node", "bin/dirgha.mjs", "scan", "--builtin", "--sarif"]
+              env:
+                - name: DIRGHA_ORG_POLICY
+                  value: "/etc/dirgha/policy.json"
+                - name: HOME
+                  value: "/tmp/dirgha-home"
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: org-policy
+                  mountPath: /etc/dirgha
+                  readOnly: true
+                - name: tmp-home
+                  mountPath: /tmp
+          volumes:
+            - name: org-policy
+              configMap:
+                name: dirgha-org-policy
+                defaultMode: 0444
+            - name: tmp-home
+              emptyDir:
+                sizeLimit: 128Mi

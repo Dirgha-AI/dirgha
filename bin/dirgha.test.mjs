@@ -44,10 +44,11 @@ test("dirgha doctor reports HEALTHY, v1 coding CLI integrated, and <25 MB native
   assert.equal(rep.v1_coding_cli_integrated, true);
   assert.equal(rep.lokahi_wasm_gate.lokahi_50_red_team, "50/50 PASS");
   assert.equal(rep.rust_native_host.under_25mb_gate, true);
-  assert.ok(rep.provider_router.opencode_catalog_providers >= 38);
+  assert.ok(rep.provider_router.dirgha_catalog_providers >= 38);
+  assert.equal("opencode_catalog_providers" in rep.provider_router, false);
 });
 
-test("unified CLI routes both v1 coding commands (hardware, status) and v2 kernel commands (--self-test, cockpit)", () => {
+test("unified CLI routes both v1 coding commands (hardware, gpu, status) and v2 kernel commands (--self-test, cockpit)", () => {
   const ver = execFileSync(process.execPath, [cliPath, "--version"], { encoding: "utf8" }).trim();
   assert.equal(ver, "@dirgha/code 2.0.0");
 
@@ -70,5 +71,23 @@ test("unified CLI routes both v1 coding commands (hardware, status) and v2 kerne
     const serveParsed = JSON.parse(serveOnceRaw);
     assert.equal(serveParsed.status, "PASS");
     assert.equal(serveParsed.pwa_manifest_verified, true);
+  } else {
+    // Without native binary, --self-test runs portable WASM check, while kernel verbs like cockpit fail honestly
+    const selfTestRaw = execFileSync(process.execPath, [cliPath, "--self-test"], { encoding: "utf8" });
+    const parsed = JSON.parse(selfTestRaw);
+    assert.equal(parsed.status, "PASS");
+    assert.equal(parsed.mode, "PORTABLE_WASM_FALLBACK");
+    assert.equal(parsed.native_host_present, false);
+
+    let failedHonestly = false;
+    try {
+      execFileSync(process.execPath, [cliPath, "cockpit"], { encoding: "utf8", stdio: "pipe" });
+    } catch (err) {
+      failedHonestly =
+        err.status === 1 &&
+        typeof err.stderr === "string" &&
+        err.stderr.includes("native_host_missing");
+    }
+    assert.equal(failedHonestly, true, "cockpit must exit 1 with native_host_missing when binary is absent");
   }
 });

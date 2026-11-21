@@ -40,6 +40,7 @@ import { LoopDetector } from "../../subagents/loop-detector.js";
 import type { ProviderRegistry } from "../../providers/index.js";
 import type { ToolRegistry } from "../../tools/registry.js";
 import { createToolExecutor } from "../../tools/exec.js";
+import { createRuntimePermissionEngine } from "../../safety/lokahi-runtime.js";
 import {
   createInkApprovalBus,
   type InkApprovalBus,
@@ -991,10 +992,15 @@ export function App(props: AppProps): React.JSX.Element {
     }
 
     try {
+      const permission = createRuntimePermissionEngine({
+        cwd: props.cwd,
+        modules: props.config.modules,
+      });
       const executor = createToolExecutor({
         registry: props.registry,
         cwd: props.cwd,
         sessionId: sessionIdRef.current,
+        permission,
         sandboxMode: sandboxModeRef.current,
         onProgress: (toolId: string, message: string): void => {
           props.events.emit({

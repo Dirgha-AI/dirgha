@@ -25,6 +25,8 @@ import {
 import { loadConfig } from "./config.js";
 import { parseFlags } from "./flags.js";
 import { runInteractive } from "./interactive.js";
+import { resolveModulesConfig } from "../safety/modules-config.js";
+import { createRuntimePermissionEngine } from "../safety/lokahi-runtime.js";
 import { builtinSlashCommands } from "./slash/index.js";
 import { renderStreamingEvents } from "../tui/renderer.js";
 import { createSessionStore } from "../context/session.js";
@@ -330,6 +332,34 @@ async function main(): Promise<void> {
   }
 
   const config = await loadConfig(cwd());
+
+  // Resolve optional stack modules (LOKAHI, Arniko, Ahimsa, GPU Cloud Market)
+  // and enforce Enterprise Org Policy Lock (/etc/dirgha/policy.json) if present.
+  const moduleRes = resolveModulesConfig({
+    profile: config.profile,
+    configured: config.modules,
+    flags,
+  });
+  for (const warn of moduleRes.warnings) {
+    process.stderr.write(`[dirgha] warning: ${warn}\n`);
+  }
+  if (moduleRes.errors.length > 0) {
+    for (const err of moduleRes.errors) {
+      process.stderr.write(`[dirgha] policy error: ${err}\n`);
+    }
+    exit(1);
+  }
+  config.profile = moduleRes.profile;
+  config.modules = moduleRes.modules;
+
+  const permissionEngine = createRuntimePermissionEngine({
+    cwd: cwd(),
+    modules: config.modules,
+    onAdvisory: (msg) => {
+      process.stderr.write(`${msg}\n`);
+    },
+  });
+
   // CLI-level overrides for flags that affect interactive mode too.
   // `--yolo` is the most surface-level form of "skip every approval",
   // more discoverable than `DIRGHA_MODE=yolo`.
@@ -687,6 +717,8 @@ async function main(): Promise<void> {
     registry,
     cwd: cwd(),
     sessionId,
+    permission: permissionEngine,
+    sandboxMode: config.sandbox ?? "off",
     lazyLoadPromise: mcpLoadPromise,
   });
   const sanitized = registry.sanitize({ descriptionLimit: 200 });
@@ -982,18 +1014,28 @@ Subcommands:
   telemetry <status|enable|...>      Anonymous usage opt-in (default: OFF)
   submit-paper <doi>                  Fetch Crossref metadata, emit JSON
   scaffold "<prompt>" [--serve]      Spin up a new project from a prompt
+  gpu <list|providers|submit|certify|budget|jobs>
+                                      Open GPU Cloud Market & provider onboarding
+  scan [--sarif] [--scanners=...]     Opt-in Arniko security scan (OASIS SARIF 2.1)
 
 Options:
   -m, --model <id>                    Model id (default from config)
   -t, --temperature <n>               Sampling temperature
   -s, --system <text>                 System prompt
       --max-turns <n>                 Max agent turns
+      --profile <name>                Stack profile: developer|safe-dev|team|enterprise|robotics
+      --lokahi / --no-lokahi          Enable/disable LOKAHI runtime gate (subject to org lock)
+      --lokahi-mode <mode>            LOKAHI mode: off | advisory | enforce
+      --arniko / --no-arniko          Enable/disable Arniko security scanner
+      --no-gpu                        Disable GPU Cloud Market tools for this run
       --print                         Non-interactive; text output
       --json                          NDJSON event output
   -h, --help                          This help
 
 Environment:
   DIRGHA_MODEL, DIRGHA_MAX_TURNS, DIRGHA_SHOW_THINKING
+  DIRGHA_PROFILE, DIRGHA_LOKAHI_MODE, DIRGHA_LOKAHI_MANIFEST, DIRGHA_ARNIKO,
+  DIRGHA_GPU_MARKET, DIRGHA_ORG_POLICY
   NVIDIA_API_KEY, OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY,
   GEMINI_API_KEY / GOOGLE_API_KEY
 `);

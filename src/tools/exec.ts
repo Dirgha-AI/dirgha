@@ -21,6 +21,11 @@ import type { SandboxAdapter } from "../safety/sandbox/iface.js";
 import type { PermissionEngine } from "./permission.js";
 import { safeEnvironment } from "../utils/env.js";
 import { selectSandbox } from "../safety/sandbox/select.js";
+import {
+  createRuntimePermissionEngine,
+  extractToolIntent,
+} from "../safety/lokahi-runtime.js";
+import { resolveModulesConfig } from "../safety/modules-config.js";
 import { wrapLegacyResult, internalError } from './result-wrappers.js';
 import { distillToolResult } from './distill.js';
 
@@ -72,6 +77,29 @@ export function createToolExecutor(opts: ToolExecutorOptions): ToolExecutor {
     sandboxPromise = Promise.resolve(null);
   }
 
+  // Defense-in-depth: if the caller did not inject a PermissionEngine explicitly
+  // but an enterprise Org Policy Lock or DIRGHA_LOKAHI_MODE env override is active,
+  // auto-wire the runtime LOKAHI engine so no entry point can bypass org policy.
+  let permission = opts.permission;
+  if (!permission) {
+    const resolved = resolveModulesConfig();
+    if (
+      resolved.orgLocked ||
+      resolved.modules.lokahi.mode !== "off" ||
+      resolved.modules.arniko.enabled ||
+      !resolved.modules.gpuMarket.enabled ||
+      (resolved.modules.gpuMarket.allowedJurisdictions?.length ?? 0) > 0
+    ) {
+      permission = createRuntimePermissionEngine({
+        cwd: opts.cwd,
+        modules: resolved.modules,
+        onAdvisory: (msg) => {
+          opts.log?.("warn", msg);
+        },
+      });
+    }
+  }
+
   return {
     async execute(call: ToolCall, signal: AbortSignal): Promise<ToolResult> {
       let tool = opts.registry.get(call.name);
@@ -86,12 +114,10 @@ export function createToolExecutor(opts: ToolExecutorOptions): ToolExecutor {
         const suggestions = closestMatches(call.name, available, 3);
         return toolError('tool_not_found', `Tool "${call.name}" is not registered. ${available.length} tools available. ${suggestions.length > 0 ? 'Did you mean: ' + suggestions.join(', ') + '?' : 'Use the tool registry list to see what is callable.'}`);
       }
-      if (opts.permission) {
-        const decision = opts.permission.check({
-          tool: call.name,
-          action: "exec",
-          target: opts.cwd,
-        });
+      if (permission) {
+        const decision = permission.checkCall
+          ? permission.checkCall(call)
+          : permission.check(extractToolIntent(call, opts.cwd).check);
         if (!decision.allowed) {
           return toolError('permission', `Permission denied: ${decision.reason}`);
         }
@@ -129,13 +155,22 @@ async function runTool(
   const started = Date.now();
   const deadlineMs = tool.timeoutMs ?? 0;
 
-  // Race tool.execute against ctx.signal so ESC aborts immediately
-  // instead of waiting for tool completion. Tolerate legacy callers
-  // and test harnesses that pass a ctx without a signal — the abort
-  // race is then a never-resolving promise that simply waits for the
-  // tool/timeout to settle, identical to pre-fix behaviour for those
-  // callers. The real agent loop always passes a signal so the abort
-  // behaviour is preserved end-to-end.
+  // Link caller AbortSignal to a per-call AbortController so that tool timeouts
+  // also abort underlying child processes / HTTP requests cleanly.
+  const callAbort = new AbortController();
+  const forwardAbort = () => callAbort.abort();
+  if (ctx.signal) {
+    if (ctx.signal.aborted) {
+      callAbort.abort();
+    } else {
+      ctx.signal.addEventListener("abort", forwardAbort, { once: true });
+    }
+  }
+  const effectiveCtx: ToolContext = {
+    ...ctx,
+    signal: callAbort.signal,
+  };
+
   const abortPromise = ctx.signal
     ? new Promise<ToolResult>((resolve) => {
         if (ctx.signal!.aborted) {
@@ -155,21 +190,30 @@ async function runTool(
       });
 
   let result: ToolResult;
-  if (deadlineMs > 0) {
-    result = await Promise.race([
-      tool.execute(input, ctx),
-      abortPromise,
-      new Promise<ToolResult>((resolve) => {
-        const timer = setTimeout(() => {
-          resolve(toolError('timeout', `Tool "${tool.name}" timed out after ${deadlineMs}ms.`, { durationMs: deadlineMs }));
-        }, deadlineMs);
-        ctx.signal?.addEventListener("abort", () => clearTimeout(timer), {
-          once: true,
-        });
-      }),
-    ]);
-  } else {
-    result = await Promise.race([tool.execute(input, ctx), abortPromise]);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    if (deadlineMs > 0) {
+      result = await Promise.race([
+        tool.execute(input, effectiveCtx),
+        abortPromise,
+        new Promise<ToolResult>((resolve) => {
+          timer = setTimeout(() => {
+            callAbort.abort();
+            resolve(toolError('timeout', `Tool "${tool.name}" timed out after ${deadlineMs}ms.`, { durationMs: deadlineMs }));
+          }, deadlineMs);
+          ctx.signal?.addEventListener("abort", () => {
+            if (timer) clearTimeout(timer);
+          }, { once: true });
+        }),
+      ]);
+    } else {
+      result = await Promise.race([tool.execute(input, effectiveCtx), abortPromise]);
+    }
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (ctx.signal) {
+      ctx.signal.removeEventListener("abort", forwardAbort);
+    }
   }
   const finalDuration = result.durationMs ?? Date.now() - started;
   // Canonicalise: every result reaches the agent loop as a v2 ToolResult

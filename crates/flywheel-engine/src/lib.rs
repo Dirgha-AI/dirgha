@@ -9,9 +9,57 @@
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io;
+#[cfg(unix)]
+use std::io::Read;
+use std::io::Write;
 use std::path::Path;
 
-/// Load or generate a persistent 32-byte Ed25519 signing key at `data/keys/flywheel_ed25519.key`.
+fn fill_os_random_bytes(buffer: &mut [u8]) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        let mut source = fs::File::open("/dev/urandom")?;
+        source.read_exact(buffer)
+    }
+    #[cfg(windows)]
+    {
+        #[link(name = "bcrypt")]
+        unsafe extern "system" {
+            fn BCryptGenRandom(
+                algorithm: *mut std::ffi::c_void,
+                buffer: *mut u8,
+                length: u32,
+                flags: u32,
+            ) -> i32;
+        }
+        const BCRYPT_USE_SYSTEM_PREFERRED_RNG: u32 = 0x00000002;
+        let len: u32 = buffer
+            .len()
+            .try_into()
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "random buffer too large"))?;
+        let status = unsafe {
+            BCryptGenRandom(
+                std::ptr::null_mut(),
+                buffer.as_mut_ptr(),
+                len,
+                BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+            )
+        };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(io::Error::other(format!("BCryptGenRandom failed: 0x{status:08x}")))
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = buffer;
+        Err(io::Error::other("no supported operating-system CSPRNG"))
+    }
+}
+
+/// Load or generate a persistent 32-byte Ed25519 signing key at `data/keys/flywheel_ed25519.key`
+/// using the operating system CSPRNG (never a deterministic path hash).
 pub fn load_or_create_flywheel_signing_key() -> SigningKey {
     let key_path = Path::new("data/keys/flywheel_ed25519.key");
     if let Ok(hex_str) = fs::read_to_string(key_path) {
@@ -21,15 +69,20 @@ pub fn load_or_create_flywheel_signing_key() -> SigningKey {
             }
         }
     }
-    let material = format!(
-        "dirgha-flywheel-ed25519-recipe-signer-v3.1:{:?}",
-        std::env::current_dir().ok()
-    );
-    let key_digest = blake3::hash(material.as_bytes());
-    let key = SigningKey::from_bytes(key_digest.as_bytes());
+    let mut key_bytes = [0u8; 32];
+    fill_os_random_bytes(&mut key_bytes)
+        .expect("OS CSPRNG unavailable; refusing to sign flywheel recipe lockfile");
+    let key = SigningKey::from_bytes(&key_bytes);
     if let Some(parent) = key_path.parent() {
         let _ = fs::create_dir_all(parent);
-        let _ = fs::write(key_path, hex::encode(key.to_bytes()));
+    }
+    if let Ok(mut file) = fs::OpenOptions::new().write(true).create_new(true).open(key_path) {
+        let _ = file.write_all(hex::encode(key.to_bytes()).as_bytes());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(key_path, fs::Permissions::from_mode(0o600));
+        }
     }
     key
 }

@@ -44,7 +44,7 @@ pub struct ProviderEndpoint {
     pub is_local: bool,
 }
 
-/// Summary of a discovered LLM provider (from built-in 2026 frontier catalog + `~/.cache/opencode/models.json`).
+/// Summary of discovered LLM providers from Dirgha's built-in catalog and local key store.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderCatalogSummary {
     pub total_providers_discovered: usize,
@@ -54,35 +54,11 @@ pub struct ProviderCatalogSummary {
     pub physical_ai_vla_models: Vec<String>,
 }
 
-/// Discover all available providers and models by combining Dirgha's built-in 2026 Frontier & Local catalog
-/// with the user's live OpenCode `models.dev` cache (`~/.cache/opencode/models.json`, 235+ providers)
-/// and checking which providers have active API keys in env vars or `~/.local/share/opencode/auth.json`.
+/// Discover available providers and models from Dirgha's built-in catalog and check
+/// which providers have active API keys in environment variables or `~/.dirgha/keys.json`.
 pub fn discover_provider_catalog_summary() -> ProviderCatalogSummary {
-    let mut total_providers = 38usize; // Built-in baseline
-    let mut total_models = 320usize;
-
-    if let Ok(home) = std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")) {
-        let cache_path = std::path::Path::new(&home)
-            .join(".cache")
-            .join("opencode")
-            .join("models.json");
-        if let Ok(raw) = std::fs::read_to_string(cache_path) {
-            if let Ok(parsed) = serde_json::from_str::<Value>(&raw) {
-                if let Some(obj) = parsed.as_object() {
-                    total_providers = obj.len();
-                    total_models = obj
-                        .values()
-                        .map(|v| {
-                            v.get("models")
-                                .and_then(|m| m.as_object())
-                                .map(|m| m.len())
-                                .unwrap_or(0)
-                        })
-                        .sum();
-                }
-            }
-        }
-    }
+    let total_providers = 38usize; // Built-in Dirgha provider registry baseline
+    let total_models = 150usize;
 
     let mut authenticated_providers = vec!["ollama-local-gguf".to_string()];
     for candidate in [
@@ -112,16 +88,12 @@ pub fn discover_provider_catalog_summary() -> ProviderCatalogSummary {
         total_models_discovered: total_models,
         authenticated_providers,
         frontier_2026_featured_models: vec![
-            "openrouter/free (Auto-Router: xing4.0-29b-a4b:free / lfm-2.5-2.6b:free)".into(),
-            "traycer-gemini/gemini-4-argon (Gemini 4 Argon)".into(),
-            "traycer-anthropic/claude-fable-5 & claude-opus-5-5".into(),
-            "traycer-openai/gpt-6-astra & gpt-6.1-sol".into(),
-            "traycer-openrouter/deepseek/deepseek-v4-pro & deepseek-v4-flash".into(),
-            "traycer-openrouter/z-ai/glm-5.3-flash & glm-5.2".into(),
-            "traycer-openrouter/moonshotai/kimi-k3 & kimi-k2.7-code".into(),
-            "traycer-openrouter/minimax/minimax-m3".into(),
-            "traycer-meta/muse-wonder-1.0 & muse-spark-1.3".into(),
-            "traycer-xai/grok-4.7 & grok-4.6".into(),
+            "deepseek-ai/deepseek-v4-flash (DeepSeek / NVIDIA NIM)".into(),
+            "anthropic/claude-sonnet-4 & claude-opus-4".into(),
+            "openai/gpt-4.1 & o3".into(),
+            "google/gemini-2.5-pro & gemini-2.5-flash".into(),
+            "openrouter/auto".into(),
+            "ollama/qwen2.5-coder & deepseek-r1 (Local Offline)".into(),
         ],
         physical_ai_vla_models: vec![
             "physical_intelligence_pi0/pi0.5 (OpenPi Flow-Matching VLA)".into(),
@@ -306,10 +278,10 @@ pub fn dispatch_http_chat_completion(
 }
 
 /// Resolve an API key for a cloud provider (`openrouter`, `nvidia`, `vercel`, `openai`, `anthropic`, `deepseek`)
-/// from environment variables first, falling back to the user's local OpenCode auth store
-/// (`~/.local/share/opencode/auth.json`) without ever logging or exposing the raw secret.
+/// from environment variables first, falling back to Dirgha's own local key store (`~/.dirgha/keys.json`)
+/// without ever reading unrelated third-party credential files.
 pub fn resolve_provider_api_key(provider_id: &str) -> Option<String> {
-    let env_name = format!("{}_API_KEY", provider_id.to_ascii_uppercase());
+    let env_name = format!("{}_API_KEY", provider_id.to_ascii_uppercase().replace('-', "_"));
     if let Ok(val) = std::env::var(&env_name) {
         if !val.trim().is_empty() {
             return Some(val.trim().to_string());
@@ -319,17 +291,14 @@ pub fn resolve_provider_api_key(provider_id: &str) -> Option<String> {
     let home = std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
         .ok()?;
-    let auth_path = std::path::Path::new(&home)
-        .join(".local")
-        .join("share")
-        .join("opencode")
-        .join("auth.json");
-    let raw = std::fs::read_to_string(auth_path).ok()?;
+    let keys_path = std::path::Path::new(&home)
+        .join(".dirgha")
+        .join("keys.json");
+    let raw = std::fs::read_to_string(keys_path).ok()?;
     let parsed: Value = serde_json::from_str(&raw).ok()?;
     parsed
         .get(provider_id)
-        .and_then(|p| p.get("key"))
-        .and_then(|k| k.as_str())
+        .and_then(|v| v.as_str().or_else(|| v.get("key").and_then(|k| k.as_str())))
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
 }
@@ -347,7 +316,7 @@ pub fn dispatch_openrouter_https_chat(
     user_prompt: &str,
 ) -> Result<HttpChatResult, String> {
     let api_key = resolve_provider_api_key("openrouter")
-        .ok_or_else(|| "No OpenRouter API key found in OPENROUTER_API_KEY or ~/.local/share/opencode/auth.json".to_string())?;
+        .ok_or_else(|| "No OpenRouter API key found in OPENROUTER_API_KEY or ~/.dirgha/keys.json".to_string())?;
 
     let masked_sys = proxy.mask_outbound(system_prompt);
     let masked_usr = proxy.mask_outbound(user_prompt);
