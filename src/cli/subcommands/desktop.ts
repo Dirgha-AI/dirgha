@@ -18,6 +18,7 @@ import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { stdout, stderr } from "node:process";
+import { fileURLToPath } from "node:url";
 import { style, defaultTheme } from "../../tui/theme.js";
 import type { Subcommand, SubcommandCtx } from "./index.js";
 
@@ -51,7 +52,14 @@ export const desktopSubcommand: Subcommand = {
     const json = argv.includes("--json");
     const port = parsePort(argv);
 
-    const desktopRoot = path.resolve(ctx.cwd, "desktop");
+    let desktopRoot = path.resolve(ctx.cwd, "desktop");
+    if (!existsSync(path.join(desktopRoot, "dist"))) {
+      const packageRoot = path.resolve(fileURLToPath(import.meta.url), "../../../..");
+      const candidate = path.join(packageRoot, "desktop");
+      if (existsSync(path.join(candidate, "dist"))) {
+        desktopRoot = candidate;
+      }
+    }
     const distRoot = path.resolve(desktopRoot, "dist");
 
     if (isDev) {
