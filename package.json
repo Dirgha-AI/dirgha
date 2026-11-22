@@ -1,6 +1,6 @@
 {
   "name": "@dirgha/code",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Open-source local coding agent, modular LOKAHI safety gate, Arniko SARIF security scanner, Exa MCP web search, Open GPU Cloud Market router, and MuJoCo robotics harness.",
   "license": "Apache-2.0",
   "author": "Salik Shah",

@@ -2,6 +2,23 @@
 
 All notable changes are tracked here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); we use [Semantic Versioning](https://semver.org/).
 
+## [2.0.1] - 2026-11-22
+
+Enterprise Agent Gateway SSE streaming interceptor, Claude Opus-hardened multi-tool isolation, and tamper-evident Ed25519 DSSE audit ledger.
+
+### Added
+- Enterprise SSE streaming reverse proxy interceptor (`src/gateway/streaming.ts`) supporting OpenAI and Anthropic protocol streams.
+- Zero-latency passthrough for benign text content with real-time mid-stream interception of dangerous model tool calls.
+- Schema-compliant refusal event injection (`[LOKAHI GATE REFUSAL]`) into active client streams on policy violations.
+- Tamper-evident append-only cryptographic audit ledger with Ed25519 DSSE signed envelopes and SHA-256 block hash chaining.
+- Persistent ledger chain initialization across gateway restarts (`ensureLedgerInitialized`).
+
+### Security & Hardening
+- Claude Opus 5.5 red-team remediation: eliminated parser differential and SSE reassembly bypasses.
+- Multi-tool concurrency isolation: block-indexed `Map<number, ActiveAnthropicToolBlock>` preventing race conditions on interleaved Anthropic streaming tool calls.
+- Strict fail-closed policy: malformed or unparsable JSON tool argument deltas immediately trigger rejection.
+- Shell tokenizer AST hardening against command chaining and flag obfuscation.
+
 ## [2.0.0] - 2026-11-20
 
 Dirgha 2.0: one harness for coding agents and robot simulation, now Apache-2.0.

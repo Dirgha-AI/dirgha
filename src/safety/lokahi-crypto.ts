@@ -283,7 +283,7 @@ export function buildComplianceEvidencePack(opts: {
   const unsignedCore = {
     schemaVersion: "dirgha.evidence.v1" as const,
     generatedAt: now.toISOString(),
-    packageVersion: "2.0.0",
+    packageVersion: "2.0.1",
     governance: {
       profile: opts.resolution.profile,
       orgLocked: opts.resolution.orgLocked,

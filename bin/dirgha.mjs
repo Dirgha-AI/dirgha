@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * `@dirgha/code` 2.0.0: unified CLI, TUI & Sovereign Rust Kernel Entry Point.
+ * `@dirgha/code` 2.0.1: unified CLI, TUI & Sovereign Rust Kernel Entry Point.
  *
  * Unifies:
  * 1. All 38 existing `@dirgha/code` v1.43.3 coding subcommands (`ask`, `chat`, `fleet`, `orchestra`,
@@ -176,8 +176,8 @@ export async function runDoctor() {
 
   const report = {
     status: wasmCheck.redTeamPassed === 50 && wasmCheck.cAbiVerified ? "HEALTHY" : "DEGRADED",
-    package: "@dirgha/code@2.0.0",
-    kernel_version: "2.0.0",
+    package: "@dirgha/code@2.0.1",
+    kernel_version: "2.0.1",
     platform: `${process.platform}-${process.arch}`,
     node_version: process.version,
     v1_coding_cli_integrated: v1DistPresent,
@@ -212,7 +212,7 @@ async function main() {
   const cmd = args[0];
 
   if (cmd === "--version" || cmd === "-v" || cmd === "-V") {
-    console.log("@dirgha/code 2.0.0");
+    console.log("@dirgha/code 2.0.1");
     return;
   }
 
@@ -257,7 +257,7 @@ async function main() {
           {
             status: passed ? "PASS" : "FAIL",
             mode: "PORTABLE_WASM_FALLBACK",
-            version: "2.0.0",
+            version: "2.0.1",
             lokahi_50_red_team: `${wasmCheck.redTeamPassed}/50 PASS`,
             c_abi_verified: wasmCheck.cAbiVerified,
             native_host_present: false,

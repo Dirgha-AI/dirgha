@@ -50,7 +50,7 @@ test("dirgha doctor reports HEALTHY, v1 coding CLI integrated, and <25 MB native
 
 test("unified CLI routes both v1 coding commands (hardware, gpu, status) and v2 kernel commands (--self-test, cockpit)", () => {
   const ver = execFileSync(process.execPath, [cliPath, "--version"], { encoding: "utf8" }).trim();
-  assert.equal(ver, "@dirgha/code 2.0.0");
+  assert.equal(ver, "@dirgha/code 2.0.1");
 
   // Verify v1 subcommand (`dirgha hardware --json`) routes cleanly through `dist/cli/main.js`
   const hwRaw = execFileSync(process.execPath, [cliPath, "hardware", "--json"], { encoding: "utf8" });

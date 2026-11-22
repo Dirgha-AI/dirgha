@@ -53,7 +53,7 @@ export function startGatewayServer(options: GatewayServerOptions = {}): http.Ser
         JSON.stringify({
           status: "ok",
           service: "Dirgha Agent Gateway",
-          version: "2.0.0",
+          version: "2.0.1",
           gate: "LOKAHI_WASM",
           host,
           port,
