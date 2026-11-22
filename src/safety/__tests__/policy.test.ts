@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { evaluateLokahiGateSync, type LokahiWasmSyncExports } from "../policy.js";
+import { createPolicyEngine, evaluateLokahiGateSync, type LokahiWasmSyncExports } from "../policy.js";
 
 const originalOptOut = process.env.DIRGHA_ALLOW_UNGATED;
 
@@ -38,13 +38,28 @@ describe("Lokahi WASM gate fail-closed behavior", () => {
     });
   });
 
-  it("requires the explicit opt-out and emits a loud warning", () => {
+  it("strictly fails closed and denies even if DIRGHA_ALLOW_UNGATED is set (no bypass permitted)", () => {
     process.env.DIRGHA_ALLOW_UNGATED = "1";
-    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
     expect(evaluateLokahiGateSync("safe", false, null)).toEqual({
-      allowed: true,
-      reason: "lokahi_gate_unavailable_opt_out",
+      allowed: false,
+      reason: "lokahi_gate_unavailable",
     });
-    expect(warning).toHaveBeenCalledWith(expect.stringContaining("DIRGHA_ALLOW_UNGATED=1"));
+  });
+});
+
+describe("Declarative policy engine fail-closed defaults", () => {
+  it("denies unknown tools/actions with default-deny catch-all", () => {
+    const engine = createPolicyEngine({ cwd: process.cwd(), rules: [] });
+    // An unrecognized action and tool
+    const decision = engine.evaluate({
+      tool: "rogue_tool",
+      action: "unknown" as any,
+      target: "some_target",
+    });
+    expect(decision).toEqual({
+      allowed: false,
+      requiresApproval: false,
+      reason: "default-deny: unrecognized tool or action without explicit policy permit",
+    });
   });
 });

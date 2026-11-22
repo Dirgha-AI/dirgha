@@ -169,7 +169,9 @@ export function classifyToolCall(
     norm === "write_file" ||
     norm === "edit_file" ||
     norm === "create_file" ||
-    norm === "save_file"
+    norm === "save_file" ||
+    norm === "fs_write" ||
+    norm === "fs_edit"
   ) {
     const targetPath = String(args.path || args.file || args.filename || args.target_file || "");
     return {
@@ -178,15 +180,24 @@ export function classifyToolCall(
     };
   }
 
-  // 3. File view, read tools
+  // 3. File view, read, search tools
   if (
     norm === "read_file" ||
     norm === "view" ||
     norm === "cat" ||
     norm === "get_file_contents" ||
-    norm === "open_file"
+    norm === "open_file" ||
+    norm === "fs_read" ||
+    norm === "fs_ls" ||
+    norm === "ls" ||
+    norm === "list_directory" ||
+    norm === "list_files" ||
+    norm === "search_grep" ||
+    norm === "grep" ||
+    norm === "search_glob" ||
+    norm === "glob"
   ) {
-    const targetPath = String(args.path || args.file || args.filename || "");
+    const targetPath = String(args.path || args.file || args.filename || args.query || args.pattern || "");
     return {
       action: "read",
       target: targetPath,
@@ -194,7 +205,7 @@ export function classifyToolCall(
   }
 
   // 4. File delete tools
-  if (norm === "delete_file" || norm === "remove_file" || norm === "unlink") {
+  if (norm === "delete_file" || norm === "remove_file" || norm === "unlink" || norm === "fs_delete") {
     const targetPath = String(args.path || args.file || "");
     return {
       action: "delete",
@@ -211,9 +222,9 @@ export function classifyToolCall(
     };
   }
 
-  // Catch-all
+  // Catch-all: Unmapped / unknown tools are classified as unknown action for fail-closed policy denial
   return {
-    action: "exec",
+    action: "unknown" as unknown as PermissionCheck["action"],
     target: JSON.stringify(args),
   };
 }

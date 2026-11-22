@@ -74,14 +74,6 @@ function getLokahiWasmSync(): LokahiWasmSyncExports | null {
   }
 }
 
-function allowUngatedForDevelopment(): boolean {
-  if (process.env.DIRGHA_ALLOW_UNGATED === "1") {
-    console.warn("[DIRGHA SECURITY WARNING] DIRGHA_ALLOW_UNGATED=1 bypasses the Lokahi WASM gate; use only for local development.");
-    return true;
-  }
-  return false;
-}
-
 /** Evaluate the WASM gate and fail closed for missing, malformed, throwing, or unknown verdicts. */
 export function evaluateLokahiGateSync(
   payload: string,
@@ -93,26 +85,20 @@ export function evaluateLokahiGateSync(
       ? wasmOrLoader()
       : wasmOrLoader === undefined ? getLokahiWasmSync() : wasmOrLoader;
     if (!wasm || typeof wasm.lokahi_c_abi_evaluate_utf8 !== "function" || !wasm.memory) {
-      return allowUngatedForDevelopment()
-        ? { allowed: true, reason: "lokahi_gate_unavailable_opt_out" }
-        : { allowed: false, reason: "lokahi_gate_unavailable" };
+      return { allowed: false, reason: "lokahi_gate_unavailable" };
     }
     const encoded = new TextEncoder().encode(payload);
     const allocator = wasm.lokahi_alloc ?? wasm.alloc ?? wasm.malloc;
     const pointer = allocator ? allocator(encoded.length) : 65536;
     if (!Number.isInteger(pointer) || pointer < 0 || pointer + encoded.length > wasm.memory.buffer.byteLength) {
-      return allowUngatedForDevelopment()
-        ? { allowed: true, reason: "lokahi_gate_memory_unavailable_opt_out" }
-        : { allowed: false, reason: "lokahi_gate_memory_unavailable" };
+      return { allowed: false, reason: "lokahi_gate_memory_unavailable" };
     }
     try {
       new Uint8Array(wasm.memory.buffer, pointer, encoded.length).set(encoded);
       const verdict = wasm.lokahi_c_abi_evaluate_utf8(pointer, encoded.length, isS2Critical ? 1 : 0);
       if (verdict === 1) return { allowed: true, reason: "lokahi_gate_allow" };
       if (verdict === 0) return { allowed: false, reason: "lokahi_gate_denied" };
-      return allowUngatedForDevelopment()
-        ? { allowed: true, reason: "lokahi_gate_unknown_opt_out" }
-        : { allowed: false, reason: "lokahi_gate_unavailable" };
+      return { allowed: false, reason: "lokahi_gate_unavailable" };
     } finally {
       if (allocator && typeof wasm.lokahi_free === "function") {
         try {
@@ -123,9 +109,7 @@ export function evaluateLokahiGateSync(
       }
     }
   } catch {
-    return allowUngatedForDevelopment()
-      ? { allowed: true, reason: "lokahi_gate_error_opt_out" }
-      : { allowed: false, reason: "lokahi_gate_unavailable" };
+    return { allowed: false, reason: "lokahi_gate_unavailable" };
   }
 }
 
@@ -235,10 +219,11 @@ export function createPolicyEngine(opts: PolicyEngineOptions): PolicyEngine {
       if (!conditionMatches(rule.when, req, cwd)) continue;
       return decisionFor(rule);
     }
+    // Strict fail-closed default: any action or tool not explicitly permitted by a policy rule is denied.
     return {
-      allowed: true,
-      reason: "default catch-all allow-with-approval",
-      requiresApproval: true,
+      allowed: false,
+      reason: "default-deny: unrecognized tool or action without explicit policy permit",
+      requiresApproval: false,
     };
   };
 
