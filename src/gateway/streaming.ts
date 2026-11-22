@@ -42,7 +42,7 @@ export function handleAnthropicSSEStream(
   });
 
   let buffer = "";
-  let activeTool: ActiveAnthropicToolBlock | null = null;
+  const anthropicToolsMap = new Map<number, ActiveAnthropicToolBlock>();
 
   upstreamRes.on("data", (chunk: Buffer) => {
     buffer += chunk.toString("utf-8");
@@ -86,13 +86,13 @@ export function handleAnthropicSSEStream(
       try {
         const parsed = JSON.parse(eventData);
         if (parsed.content_block && parsed.content_block.type === "tool_use") {
-          activeTool = {
+          anthropicToolsMap.set(parsed.index, {
             index: parsed.index,
             id: parsed.content_block.id,
             name: parsed.content_block.name,
             jsonAccumulator: "",
             rawStart: rawEvent,
-          };
+          });
           return; // Buffer and do not emit yet
         }
       } catch {
@@ -101,13 +101,11 @@ export function handleAnthropicSSEStream(
     }
 
     // 2. Tool Input JSON Delta: Accumulate chunk
-    if (eventType === "content_block_delta" && activeTool) {
+    if (eventType === "content_block_delta") {
       try {
         const parsed = JSON.parse(eventData);
-        if (
-          parsed.index === activeTool.index &&
-          parsed.delta?.type === "input_json_delta"
-        ) {
+        const activeTool = anthropicToolsMap.get(parsed.index);
+        if (activeTool && parsed.delta?.type === "input_json_delta") {
           activeTool.jsonAccumulator += parsed.delta.partial_json || "";
           return; // Buffer delta chunks
         }
@@ -117,19 +115,23 @@ export function handleAnthropicSSEStream(
     }
 
     // 3. Tool Block Stop: Evaluate tool call with LOKAHI WASM Gate
-    if (eventType === "content_block_stop" && activeTool) {
+    if (eventType === "content_block_stop") {
       try {
         const parsed = JSON.parse(eventData);
-        if (parsed.index === activeTool.index) {
+        const activeTool = anthropicToolsMap.get(parsed.index);
+        if (activeTool) {
           let toolInput = {};
+          let check: { allowed: boolean; reason: string; target: string };
           try {
             toolInput = JSON.parse(activeTool.jsonAccumulator || "{}");
-          } catch {
-            toolInput = {};
+            check = evaluateInterceptedToolCall(activeTool.name, toolInput, cwd);
+          } catch (e: any) {
+            check = {
+              allowed: false,
+              reason: `Malformed JSON payload in tool arguments: ${e?.message || "parse error"}`,
+              target: activeTool.name,
+            };
           }
-
-          // Evaluate against LOKAHI WASM Gate
-          const check = evaluateInterceptedToolCall(activeTool.name, toolInput, cwd);
 
           if (check.allowed) {
             console.info(`✓ [GATE STREAM ALLOWED] Tool '${activeTool.name}' verified safe.`);
@@ -173,7 +175,7 @@ export function handleAnthropicSSEStream(
             clientRes.write(rawEvent + "\n\n");
           }
 
-          activeTool = null;
+          anthropicToolsMap.delete(parsed.index);
           return;
         }
       } catch {
@@ -279,13 +281,17 @@ export function handleOpenAISSEStream(
       if (choice?.finish_reason === "tool_calls") {
         for (const [idx, tool] of toolCallsMap.entries()) {
           let parsedArgs = {};
+          let check: { allowed: boolean; reason: string; target: string };
           try {
             parsedArgs = JSON.parse(tool.argumentsAccumulator || "{}");
-          } catch {
-            parsedArgs = {};
+            check = evaluateInterceptedToolCall(tool.name, parsedArgs, cwd);
+          } catch (e: any) {
+            check = {
+              allowed: false,
+              reason: `Malformed JSON payload in tool arguments: ${e?.message || "parse error"}`,
+              target: tool.name,
+            };
           }
-
-          const check = evaluateInterceptedToolCall(tool.name, parsedArgs, cwd);
 
           let finalArgsStr = tool.argumentsAccumulator;
           if (!check.allowed) {

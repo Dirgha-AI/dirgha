@@ -11,7 +11,8 @@
 **/node_modules/
 
 # Ephemeral runtime keys (keep public telemetry JSONs, exclude private signing keys)
-**/data/keys/*.key
+**/data/keys/
+data/*.jsonl*.key
 crates/*/data/
 
 # Confidential internal IP & Patent filings (Never push to public Git)
@@ -27,6 +28,7 @@ Thumbs.db
 /desktop/dist/
 /desktop/src-tauri/target/
 **/data/keys/
+data/*.jsonl
 *.key
 .env
 .env.*

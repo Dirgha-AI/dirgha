@@ -105,6 +105,30 @@ export function getOrCreateAuditKeyPair(cwd: string = process.cwd()): AuditKeyPa
 let activePolicyEngine: PolicyEngine | null = null;
 let ledgerIndex = 0;
 let lastBlockHash = "0000000000000000000000000000000000000000000000000000000000000000";
+let ledgerInitialized = false;
+
+function ensureLedgerInitialized(cwd: string = process.cwd()): void {
+  if (ledgerInitialized) return;
+  ledgerInitialized = true;
+  try {
+    const auditFile = path.join(cwd, "data", "gateway_audit.jsonl");
+    if (fs.existsSync(auditFile)) {
+      const content = fs.readFileSync(auditFile, "utf-8").trim();
+      if (content) {
+        const lines = content.split("\n").filter((l) => l.trim().length > 0);
+        if (lines.length > 0) {
+          const lastEntry = JSON.parse(lines[lines.length - 1]);
+          if (typeof lastEntry.index === "number" && typeof lastEntry.hash === "string") {
+            ledgerIndex = lastEntry.index;
+            lastBlockHash = lastEntry.hash;
+          }
+        }
+      }
+    }
+  } catch {
+    // Start from genesis if unreadable
+  }
+}
 
 export function getOrCreatePolicyEngine(cwd: string = process.cwd()): PolicyEngine {
   if (!activePolicyEngine) {
@@ -317,6 +341,7 @@ export function logActivity(entry: {
   verdict: "ALLOW" | "ESCALATE" | "REFUSE";
   reason: string;
 }): S2LedgerEntry {
+  ensureLedgerInitialized();
   ledgerIndex++;
   const timestamp = new Date().toISOString();
   
