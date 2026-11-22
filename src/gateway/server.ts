@@ -22,6 +22,23 @@ export interface GatewayServerOptions {
   cwd?: string;
   anthropicBaseUrl?: string;
   openaiBaseUrl?: string;
+  authToken?: string;
+  allowedOrigins?: string[];
+}
+
+function isOriginAllowed(origin: string | undefined, allowedOrigins?: string[]): boolean {
+  if (!origin) return true; // Direct non-browser CLI calls
+  if (allowedOrigins && allowedOrigins.includes(origin)) return true;
+  // Safe localhost and desktop embedded origins
+  if (
+    /^https?:\/\/localhost(:\d+)?$/.test(origin) ||
+    /^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(origin) ||
+    origin === "tauri://localhost" ||
+    origin === "http://tauri.localhost"
+  ) {
+    return true;
+  }
+  return false;
 }
 
 export function startGatewayServer(options: GatewayServerOptions = {}): http.Server {
@@ -30,12 +47,24 @@ export function startGatewayServer(options: GatewayServerOptions = {}): http.Ser
   const cwd = options.cwd || process.cwd();
   const anthropicBaseUrl = options.anthropicBaseUrl || process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com";
   const openaiBaseUrl = options.openaiBaseUrl || process.env.OPENAI_BASE_URL || "https://api.openai.com";
+  const authToken = options.authToken || process.env.DIRGHA_GATEWAY_TOKEN || process.env.DIRGHA_GATEWAY_KEY;
 
   const server = http.createServer(async (req, res) => {
-    // Enable CORS
-    res.setHeader("Access-Control-Allow-Origin", "*");
+    const origin = req.headers.origin;
+
+    // Reject untrusted cross-origin browser requests (prevent localhost CSRF/DNS-rebinding)
+    if (origin && !isOriginAllowed(origin, options.allowedOrigins)) {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Forbidden", message: `Untrusted Origin '${origin}' rejected by Dirgha Gateway.` }));
+      return;
+    }
+
+    if (origin) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Vary", "Origin");
+    }
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-api-key, anthropic-version");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-api-key, anthropic-version, x-dirgha-tenant, x-dirgha-team");
 
     if (req.method === "OPTIONS") {
       res.writeHead(204);
@@ -46,8 +75,10 @@ export function startGatewayServer(options: GatewayServerOptions = {}): http.Ser
     const parsedUrl = url.parse(req.url || "", true);
     const pathname = parsedUrl.pathname || "/";
 
-    // 1. Health check endpoint
+    // 1. Health check endpoint (public)
     if (pathname === "/health" || pathname === "/v1/health") {
+      const tenant = (req.headers["x-dirgha-tenant"] as string) || "default";
+      const team = (req.headers["x-dirgha-team"] as string) || "engineering";
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(
         JSON.stringify({
@@ -55,12 +86,31 @@ export function startGatewayServer(options: GatewayServerOptions = {}): http.Ser
           service: "Dirgha Agent Gateway",
           version: "2.0.1",
           gate: "LOKAHI_WASM",
+          auth_required: Boolean(authToken),
+          tenant,
+          team,
           host,
           port,
           cwd,
         })
       );
       return;
+    }
+
+    // Authentication verification (if DIRGHA_GATEWAY_TOKEN / authToken configured)
+    if (authToken) {
+      const authHeader = req.headers.authorization;
+      const apiKeyHeader = req.headers["x-api-key"] as string;
+      const bearerMatch = authHeader ? authHeader.replace(/^Bearer\s+/i, "").trim() : "";
+      const presented = bearerMatch || apiKeyHeader;
+      if (presented !== authToken) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({
+          error: "Unauthorized",
+          message: "Valid Bearer token or x-api-key required for Dirgha Enterprise Gateway.",
+        }));
+        return;
+      }
     }
 
     // 2. Claude Code endpoint (/v1/messages or /secure-claude)
