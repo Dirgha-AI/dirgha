@@ -19,9 +19,9 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
@@ -63,7 +63,7 @@ jobs:
             ext: ".exe"
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -88,7 +88,7 @@ jobs:
             (cd release-artifacts && shasum -a 256 "$(basename "$OUT")" > "$(basename "$OUT").sha256")
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dirgha-native-host-${{ matrix.label }}
           path: release-artifacts/*
@@ -97,7 +97,7 @@ jobs:
     name: Build LOKAHI Gate WASM
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -112,7 +112,7 @@ jobs:
           cp target/wasm32-unknown-unknown/release/lokahi_gate.wasm release-artifacts/lokahi_gate.wasm
           (cd release-artifacts && sha256sum lokahi_gate.wasm > lokahi_gate.wasm.sha256)
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: lokahi-gate-wasm
           path: release-artifacts/*
@@ -124,7 +124,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: all-artifacts
           merge-multiple: true
