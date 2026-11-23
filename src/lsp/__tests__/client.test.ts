@@ -10,6 +10,7 @@ import {
 } from "../detector.js";
 import { getLspManager, LspManager } from "../index.js";
 import { spawn } from "node:child_process";
+import { builtInTools } from "../../tools/index.js";
 
 describe("LSP symbolKindLabel", () => {
   it("returns correct labels", () => {
@@ -308,17 +309,15 @@ describe("LSP Tools (unit)", () => {
 });
 
 describe("Tool registry integration", () => {
-  it("builtInTools includes all LSP tools", async () => {
-    const { builtInTools } = await import("../../tools/index.js");
+  it("builtInTools includes all LSP tools", () => {
     const names = builtInTools.map((t) => t.name);
     expect(names).toContain("go_to_definition");
     expect(names).toContain("find_references");
     expect(names).toContain("hover_documentation");
     expect(names).toContain("document_symbols");
-  }, 20000);
+  });
 
-  it("all LSP tool names pass registry validation", async () => {
-    const { builtInTools } = await import("../../tools/index.js");
+  it("all LSP tool names pass registry validation", () => {
     const lspTools = builtInTools.filter((t) =>
       [
         "go_to_definition",
@@ -330,5 +329,5 @@ describe("Tool registry integration", () => {
     for (const tool of lspTools) {
       expect(/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(tool.name)).toBe(true);
     }
-  }, 20000);
+  });
 });
