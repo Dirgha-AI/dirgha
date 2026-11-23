@@ -6,7 +6,6 @@
 
 import * as http from "node:http";
 import * as https from "node:https";
-import * as url from "node:url";
 import {
   evaluateInterceptedToolCall,
   createCompliantRefusalArgs,
@@ -80,8 +79,9 @@ export function startGatewayServer(options: GatewayServerOptions = {}): http.Ser
         return;
       }
 
-      const parsedUrl = url.parse(req.url || "", true);
-      const pathname = parsedUrl.pathname || "/";
+      // WHATWG URL rather than the deprecated url.parse (DEP0169). Only the path
+      // is used; req.url is a path, so the base is a placeholder.
+      const pathname = new URL(req.url || "/", "http://gateway.local").pathname || "/";
 
       // 1. Health check endpoint (public)
       if (pathname === "/health" || pathname === "/v1/health") {
@@ -92,7 +92,7 @@ export function startGatewayServer(options: GatewayServerOptions = {}): http.Ser
           JSON.stringify({
             status: "ok",
             service: "Dirgha Agent Gateway",
-            version: "2.0.1",
+            version: "2.0.2",
             gate: "LOKAHI_WASM",
             auth_required: Boolean(authToken),
             tenant,

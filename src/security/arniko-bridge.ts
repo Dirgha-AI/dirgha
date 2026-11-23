@@ -281,7 +281,7 @@ export function toSarifV210(report: ArnikoScanReport): Record<string, unknown> {
       driver: {
         name: `dirgha-arniko/${r.scanner}`,
         informationUri: "https://github.com/Dirgha-AI/arniko",
-        version: "2.0.1",
+        version: "2.0.2",
       },
     },
     invocations: [

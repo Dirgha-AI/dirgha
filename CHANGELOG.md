@@ -2,6 +2,15 @@
 
 All notable changes are tracked here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); we use [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+Findings of record for this round are in [`AUDIT_FINDINGS_2026-11-23.md`](AUDIT_FINDINGS_2026-11-23.md).
+
+### Fixed
+- The policy engine now marks `exec` (not only `delete`) as S2-critical when calling the LOKAHI gate, matching `src/gateway/interceptor.ts`.
+- Replaced the deprecated `url.parse()` in `src/gateway/server.ts` with the WHATWG `URL` constructor (Node DEP0169).
+- Version drift: `package.json`, the gateway health payload, `lokahi-crypto.ts` and `arniko-bridge.ts` reported 2.0.1 while this changelog recorded 2.0.2.
+
 ## [2.0.2] - 2026-11-23
 
 Gateway stabilization, test isolation, hardened 413 request limits, and vault resealing.

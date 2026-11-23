@@ -203,7 +203,10 @@ export function createPolicyEngine(opts: PolicyEngineOptions): PolicyEngine {
 
   const evaluate = (req: PermissionCheck): PermissionDecision => {
     // The WASM capability firewall is mandatory unless the explicit local-development opt-out is set.
-    const gate = evaluateLokahiGateSync(req.target, req.action === "delete");
+    // Keep the S2-critical flag in step with the interceptor: destructive edits
+    // and shell execution both get the stricter gate, not deletion alone.
+    const isS2Critical = req.action === "delete" || req.action === "exec";
+    const gate = evaluateLokahiGateSync(req.target, isS2Critical);
     if (!gate.allowed && gate.reason !== "lokahi_gate_denied") {
       return { allowed: false, reason: gate.reason, requiresApproval: false };
     }
