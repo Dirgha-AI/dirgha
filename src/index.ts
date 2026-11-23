@@ -48,4 +48,8 @@ export type {
   PermissionCheck,
   PermissionDecision,
 } from './tools/index.js';
+
+// Export Dirgha SDK primitives & framework adapters
+export * from './sdk/index.js';
+
 export { repairJSON } from './utils/json-repair.js';

@@ -1,0 +1,51 @@
+{
+  "name": "@dirgha/sdk",
+  "version": "2.0.2",
+  "description": "Deterministic LOKAHI policy gate and real-time tool interceptor for AI agents and LLM streaming workflows.",
+  "license": "Apache-2.0",
+  "author": "Salik Shah",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Dirgha-AI/dirgha.git",
+    "directory": "packages/sdk"
+  },
+  "homepage": "https://dirgha.ai/docs",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./vercel": {
+      "import": "./dist/middleware/vercel.js",
+      "types": "./dist/middleware/vercel.d.ts"
+    },
+    "./mcp": {
+      "import": "./dist/middleware/mcp.js",
+      "types": "./dist/middleware/mcp.d.ts"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "guardrails",
+    "mcp",
+    "model-context-protocol",
+    "security",
+    "firewall",
+    "policy",
+    "vercel-ai-sdk"
+  ]
+}

@@ -2,6 +2,21 @@
 
 All notable changes are tracked here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); we use [Semantic Versioning](https://semver.org/).
 
+## [2.0.2] - 2026-11-23
+
+Gateway stabilization, test isolation, hardened 413 request limits, and vault resealing.
+
+### Added
+- Standardized TypeScript gateway routing (`dirgha gateway` and `dirgha proxy` explicitly launch the TypeScript implementation).
+- Graceful rejection of raw experimental Rust gateway proxy with actionable guidance.
+- Clean JSON 413 payload limit enforcement for oversized client requests.
+- Test fixture isolation in `crates/native-host` avoiding state collision with user workspace files.
+- Re-sealed master AES-256-GCM vault with verified origin-binding, payment approvals, and masked credit-card returns.
+
+### Fixed
+- Fixed process timeouts and atomic file locking on Windows NTFS keystore renames.
+- Fixed LSP dynamic module import timeouts by statically resolving built-in tools.
+
 ## [2.0.1] - 2026-11-22
 
 Enterprise Agent Gateway SSE streaming interceptor, Claude Opus-hardened multi-tool isolation, and tamper-evident Ed25519 DSSE audit ledger.
