@@ -5,10 +5,12 @@
 
 pub mod discovery;
 pub mod engine;
+pub mod gguf;
 pub mod partitioner;
 pub mod transport;
 
 pub use discovery::{ClusterAuth, ClusterNode, ClusterTopology, ComputeBackend};
 pub use engine::{ClusterEngine, ClusterRole, ClusterStatus};
+pub use gguf::{GgufError, GgufMetadataValue, GgufModelSummary, GgufReader, GgufTensorInfo, GGUF_MAGIC};
 pub use partitioner::{partition_layers, LayerRange, NodePartition};
 pub use transport::{PacketType, TensorFrame, DIRGHA_MAGIC, HEADER_SIZE, PROTOCOL_VERSION};
