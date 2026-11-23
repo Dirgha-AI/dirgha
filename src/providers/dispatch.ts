@@ -28,6 +28,7 @@ export type ProviderId =
   | "groq"
   | "zai"
   | "machine1"
+  | "cluster"
   | "dirgha";
 
 interface RoutingRule {
@@ -95,6 +96,10 @@ const RULES: RoutingRule[] = [
     provider: "machine1",
   },
   // Local & explicit-prefix providers.
+  {
+    match: (id) => id.startsWith("cluster/") || id.startsWith("local/"),
+    provider: "cluster",
+  },
   { match: (id) => id.startsWith("ollama/"), provider: "ollama" },
   { match: (id) => id.startsWith("llamacpp/"), provider: "llamacpp" },
   { match: (id) => id.startsWith("fireworks/"), provider: "fireworks" },

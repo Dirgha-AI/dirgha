@@ -98,6 +98,12 @@ describe("routeModel", () => {
 
   // Local + explicit-prefix providers (rules 5-7).
   describe("local + explicit-prefix providers", () => {
+    it("cluster/llama-3.3-70b → cluster", () => {
+      expect(routeModel("cluster/llama-3.3-70b")).toBe("cluster");
+    });
+    it("local/qwen-2.5-72b → cluster", () => {
+      expect(routeModel("local/qwen-2.5-72b")).toBe("cluster");
+    });
     it("ollama/llama3 → ollama", () => {
       expect(routeModel("ollama/llama3")).toBe("ollama");
     });
