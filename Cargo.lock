@@ -238,6 +238,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "dirgha-cluster"
+version = "0.2.0"
+dependencies = [
+ "blake3",
+ "ed25519-dalek",
+ "hex",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "dirgha-core"
 version = "0.2.0"
 dependencies = [

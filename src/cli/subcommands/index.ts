@@ -60,6 +60,7 @@ import { gpuSubcommand } from './gpu.js';
 import { scanSubcommand } from './scan.js';
 import { policySubcommand } from './policy.js';
 import { desktopSubcommand } from './desktop.js';
+import { clusterSubcommand } from './cluster.js';
 
 export const subcommands: Subcommand[] = [
   doctorSubcommand,
@@ -101,6 +102,7 @@ export const subcommands: Subcommand[] = [
   scanSubcommand,
   policySubcommand,
   desktopSubcommand,
+  clusterSubcommand,
 ];
 
 export function findSubcommand(verb: string): Subcommand | undefined {
@@ -171,4 +173,5 @@ export {
   compactSubcommand,
   exportSessionSubcommand,
   importSessionSubcommand,
+  clusterSubcommand,
 };

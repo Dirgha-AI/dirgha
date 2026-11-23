@@ -9,6 +9,7 @@ members = [
     "crates/flywheel-engine",
     "crates/dtrack-rs",
     "crates/native-host",
+    "crates/dirgha-cluster",
 ]
 resolver = "2"
 
