@@ -12,13 +12,13 @@ Dirgha 2.0: a TypeScript coding agent (`src/`) and a Rust kernel (`crates/`) beh
 npm ci                              # Node 22+, npm 11 (the lock file is written by npm 11)
 npm run typecheck                   # must report 0 errors
 npm run build                       # TypeScript -> dist/
-npx vitest run --dir src            # TypeScript unit tests
-node --test ./bin/dirgha.test.mjs   # launcher tests
+npm test                            # offline unit + gateway + launcher tests
+npm run test:e2e                    # live APIs, npm registry, symlink privileges
 cargo test --workspace              # Rust tests
 cargo build --release -p native-host
 ```
 
-CI runs all of these on every push to `main` (Rust on Linux and Windows, TypeScript on Linux). Some TypeScript tests are slow or flaky on Windows because they share `~/.dirgha`; run them on Linux or set `HOME` to a temporary folder.
+CI runs all of these on every push to `main` (Rust on Linux and Windows, TypeScript on Linux). `npm test` is the required offline floor and must not modify `data/`. Environment-dependent tests live in `*.e2e.test.ts` and run through `npm run test:e2e`; some of those are slow or require privileges Windows does not grant by default.
 
 ## Layout
 

@@ -26,6 +26,13 @@ export interface GatewayServerOptions {
   allowedOrigins?: string[];
 }
 
+class PayloadTooLargeError extends Error {
+  constructor() {
+    super("Request payload exceeds the 10 MB limit");
+    this.name = "PayloadTooLargeError";
+  }
+}
+
 function isOriginAllowed(origin: string | undefined, allowedOrigins?: string[]): boolean {
   if (!origin) return true; // Direct non-browser CLI calls
   if (allowedOrigins && allowedOrigins.includes(origin)) return true;
@@ -42,7 +49,7 @@ function isOriginAllowed(origin: string | undefined, allowedOrigins?: string[]):
 }
 
 export function startGatewayServer(options: GatewayServerOptions = {}): http.Server {
-  const port = options.port || parseInt(process.env.DIRGHA_GATEWAY_PORT || "8080", 10);
+  const port = options.port ?? parseInt(process.env.DIRGHA_GATEWAY_PORT || "8080", 10);
   const host = options.host || "127.0.0.1";
   const cwd = options.cwd || process.cwd();
   const anthropicBaseUrl = options.anthropicBaseUrl || process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com";
@@ -50,89 +57,124 @@ export function startGatewayServer(options: GatewayServerOptions = {}): http.Ser
   const authToken = options.authToken || process.env.DIRGHA_GATEWAY_TOKEN || process.env.DIRGHA_GATEWAY_KEY;
 
   const server = http.createServer(async (req, res) => {
-    const origin = req.headers.origin;
+    try {
+      const origin = req.headers.origin;
 
-    // Reject untrusted cross-origin browser requests (prevent localhost CSRF/DNS-rebinding)
-    if (origin && !isOriginAllowed(origin, options.allowedOrigins)) {
-      res.writeHead(403, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Forbidden", message: `Untrusted Origin '${origin}' rejected by Dirgha Gateway.` }));
-      return;
-    }
-
-    if (origin) {
-      res.setHeader("Access-Control-Allow-Origin", origin);
-      res.setHeader("Vary", "Origin");
-    }
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-api-key, anthropic-version, x-dirgha-tenant, x-dirgha-team");
-
-    if (req.method === "OPTIONS") {
-      res.writeHead(204);
-      res.end();
-      return;
-    }
-
-    const parsedUrl = url.parse(req.url || "", true);
-    const pathname = parsedUrl.pathname || "/";
-
-    // 1. Health check endpoint (public)
-    if (pathname === "/health" || pathname === "/v1/health") {
-      const tenant = (req.headers["x-dirgha-tenant"] as string) || "default";
-      const team = (req.headers["x-dirgha-team"] as string) || "engineering";
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(
-        JSON.stringify({
-          status: "ok",
-          service: "Dirgha Agent Gateway",
-          version: "2.0.1",
-          gate: "LOKAHI_WASM",
-          auth_required: Boolean(authToken),
-          tenant,
-          team,
-          host,
-          port,
-          cwd,
-        })
-      );
-      return;
-    }
-
-    // Authentication verification (if DIRGHA_GATEWAY_TOKEN / authToken configured)
-    if (authToken) {
-      const authHeader = req.headers.authorization;
-      const apiKeyHeader = req.headers["x-api-key"] as string;
-      const bearerMatch = authHeader ? authHeader.replace(/^Bearer\s+/i, "").trim() : "";
-      const presented = bearerMatch || apiKeyHeader;
-      if (presented !== authToken) {
-        res.writeHead(401, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({
-          error: "Unauthorized",
-          message: "Valid Bearer token or x-api-key required for Dirgha Enterprise Gateway.",
-        }));
+      // Reject untrusted cross-origin browser requests (prevent localhost CSRF/DNS-rebinding)
+      if (origin && !isOriginAllowed(origin, options.allowedOrigins)) {
+        res.writeHead(403, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Forbidden", message: `Untrusted Origin '${origin}' rejected by Dirgha Gateway.` }));
         return;
       }
-    }
 
-    // 2. Claude Code endpoint (/v1/messages or /secure-claude)
-    if ((pathname === "/v1/messages" || pathname === "/secure-claude") && req.method === "POST") {
-      await handleAnthropicProxy(req, res, anthropicBaseUrl, cwd);
-      return;
-    }
+      if (origin) {
+        res.setHeader("Access-Control-Allow-Origin", origin);
+        res.setHeader("Vary", "Origin");
+      }
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-api-key, anthropic-version, x-dirgha-tenant, x-dirgha-team");
 
-    // 3. OpenAI / Cursor endpoint (/v1/chat/completions)
-    if (pathname === "/v1/chat/completions" && req.method === "POST") {
-      await handleOpenAIProxy(req, res, openaiBaseUrl, cwd);
-      return;
-    }
+      if (req.method === "OPTIONS") {
+        res.writeHead(204);
+        res.end();
+        return;
+      }
 
-    // 4. Default 404
-    res.writeHead(404, { "Content-Type": "application/json" });
-    res.end(
-      JSON.stringify({
-        error: "Not Found",
-        message: `Endpoint ${pathname} not recognized by Dirgha Agent Gateway.`,
-      })
-    );
+      const parsedUrl = url.parse(req.url || "", true);
+      const pathname = parsedUrl.pathname || "/";
+
+      // 1. Health check endpoint (public)
+      if (pathname === "/health" || pathname === "/v1/health") {
+        const tenant = (req.headers["x-dirgha-tenant"] as string) || "default";
+        const team = (req.headers["x-dirgha-team"] as string) || "engineering";
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            status: "ok",
+            service: "Dirgha Agent Gateway",
+            version: "2.0.1",
+            gate: "LOKAHI_WASM",
+            auth_required: Boolean(authToken),
+            tenant,
+            team,
+            host,
+            port,
+            cwd,
+          })
+        );
+        return;
+      }
+
+      // Authentication verification (if DIRGHA_GATEWAY_TOKEN / authToken configured)
+      if (authToken) {
+        const authHeader = req.headers.authorization;
+        const apiKeyHeader = req.headers["x-api-key"] as string;
+        const bearerMatch = authHeader ? authHeader.replace(/^Bearer\s+/i, "").trim() : "";
+        const presented = bearerMatch || apiKeyHeader;
+        if (presented !== authToken) {
+          res.writeHead(401, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({
+            error: "Unauthorized",
+            message: "Valid Bearer token or x-api-key required for Dirgha Enterprise Gateway.",
+          }));
+          return;
+        }
+      }
+
+      // 2. Claude Code endpoint (/v1/messages or /secure-claude)
+      if ((pathname === "/v1/messages" || pathname === "/secure-claude") && req.method === "POST") {
+        await handleAnthropicProxy(req, res, anthropicBaseUrl, cwd);
+        return;
+      }
+
+      // 3. OpenAI / Cursor endpoint (/v1/chat/completions)
+      if (pathname === "/v1/chat/completions" && req.method === "POST") {
+        await handleOpenAIProxy(req, res, openaiBaseUrl, cwd);
+        return;
+      }
+
+      // 4. Default 404
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          error: "Not Found",
+          message: `Endpoint ${pathname} not recognized by Dirgha Agent Gateway.`,
+        })
+      );
+    } catch (error) {
+      if (res.destroyed || res.writableEnded) return;
+      if (res.headersSent) {
+        res.destroy();
+        return;
+      }
+
+      if (error instanceof PayloadTooLargeError) {
+        const body = JSON.stringify({
+          error: "Payload Too Large",
+          message: error.message,
+        });
+        res.shouldKeepAlive = false;
+        res.writeHead(413, {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(body),
+          Connection: "close",
+        });
+        res.once("finish", () => req.destroy());
+        res.end(body);
+        return;
+      }
+
+      if (req.aborted || res.destroyed) return;
+      const body = JSON.stringify({
+        error: "Gateway Request Failed",
+        message: "The gateway could not process this request.",
+      });
+      res.writeHead(500, {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(body),
+      });
+      res.end(body);
+    }
   });
 
   server.listen(port, host, () => {
@@ -398,17 +440,36 @@ async function handleOpenAIProxy(
   clientReq.end();
 }
 
-function readRequestBody(req: http.IncomingMessage): Promise<string> {
+function readRequestBody(req: http.IncomingMessage, maxBytes: number = 10 * 1024 * 1024): Promise<string> {
   return new Promise((resolve, reject) => {
     let body = "";
-    req.on("data", (chunk) => {
-      body += chunk;
+    let bytes = 0;
+    let settled = false;
+    req.on("data", (chunk: Buffer) => {
+      if (settled) return;
+      bytes += chunk.length;
+      if (bytes > maxBytes) {
+        settled = true;
+        req.pause();
+        reject(new PayloadTooLargeError());
+        return;
+      }
+      body += chunk.toString("utf-8");
     });
     req.on("end", () => {
+      if (settled) return;
+      settled = true;
       resolve(body);
     });
     req.on("error", (err) => {
+      if (settled) return;
+      settled = true;
       reject(err);
+    });
+    req.on("aborted", () => {
+      if (settled) return;
+      settled = true;
+      reject(new Error("Request was aborted by the client"));
     });
   });
 }

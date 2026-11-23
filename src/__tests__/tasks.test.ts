@@ -8,22 +8,28 @@ import {
   taskSummary,
   type Task,
 } from "../context/tasks.js";
-import { unlinkSync, existsSync, mkdirSync, rmSync } from "node:fs";
-import { homedir } from "node:os";
+import { mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
-const TMP_DIR = "/tmp/dirgha-test-tasks-" + randomUUID().slice(0, 8);
+const TMP_DIR = join(tmpdir(), "dirgha-test-tasks-" + randomUUID().slice(0, 8));
 const TEST_FILE = join(TMP_DIR, ".dirgha", "tasks.json");
 const OLD_HOME = process.env.HOME;
+const OLD_USERPROFILE = process.env.USERPROFILE;
 
 beforeAll(() => {
   mkdirSync(join(TMP_DIR, ".dirgha"), { recursive: true });
   process.env.HOME = TMP_DIR;
+  // os.homedir() reads USERPROFILE on Windows.
+  process.env.USERPROFILE = TMP_DIR;
 });
 
 afterAll(() => {
-  process.env.HOME = OLD_HOME ?? homedir();
+  if (OLD_HOME === undefined) delete process.env.HOME;
+  else process.env.HOME = OLD_HOME;
+  if (OLD_USERPROFILE === undefined) delete process.env.USERPROFILE;
+  else process.env.USERPROFILE = OLD_USERPROFILE;
   rmSync(TMP_DIR, { recursive: true, force: true });
 });
 

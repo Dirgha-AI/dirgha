@@ -222,17 +222,68 @@ async function main() {
     return;
   }
 
-  // Route `gateway` / `proxy` to Dirgha Agent Gateway (Claude Code & Cursor interceptor)
+  // The TypeScript gateway is the supported production implementation.
   if (cmd === "gateway" || cmd === "proxy") {
+    const engineIdx = args.indexOf("--engine");
+    const engineValue = engineIdx !== -1 ? args[engineIdx + 1] : undefined;
+    const nativeRequested =
+      args.includes("--experimental-rust-gateway") || engineValue === "native";
+
+    if (nativeRequested) {
+      console.error(
+        "[EXPERIMENTAL] Native gateway prototype: does not proxy upstream LLM traffic. Use the default TypeScript gateway for production."
+      );
+      const nativeBin = resolveNativeBinary();
+      if (!nativeBin) {
+        console.error(
+          JSON.stringify(
+            {
+              status: "ERROR",
+              reason: "native_host_missing",
+              command: cmd,
+              message:
+                "The experimental Rust gateway requires the dirgha-native-host binary.",
+              remediation: "Run: npm run build:native (requires Rust toolchain: https://rustup.rs)",
+            },
+            null,
+            2
+          )
+        );
+        process.exit(1);
+      }
+
+      const nativeArgs = [cmd];
+      for (let i = 1; i < args.length; i++) {
+        if (args[i] === "--experimental-rust-gateway") continue;
+        if (args[i] === "--engine") {
+          i += 1;
+          continue;
+        }
+        nativeArgs.push(args[i]);
+      }
+      const res = spawnSync(nativeBin, nativeArgs, { stdio: "inherit" });
+      process.exit(res.status ?? 0);
+    }
+
+    if (engineIdx !== -1 && engineValue !== "typescript") {
+      console.error("Unsupported gateway engine. Use --engine typescript.");
+      process.exit(1);
+    }
+
     let port = 8080;
+    let host = "127.0.0.1";
     const portIdx = args.indexOf("--port");
     if (portIdx !== -1 && args[portIdx + 1]) {
       port = parseInt(args[portIdx + 1], 10);
     }
+    const hostIdx = args.indexOf("--host");
+    if (hostIdx !== -1 && args[hostIdx + 1]) {
+      host = args[hostIdx + 1];
+    }
     const gatewayDistPath = path.join(rootDir, "dist", "gateway", "server.js");
     if (fs.existsSync(gatewayDistPath)) {
       const mod = await import(pathToFileURL(gatewayDistPath).href);
-      mod.startGatewayServer({ port });
+      mod.startGatewayServer({ port, host });
       return;
     }
     console.error("Gateway dist not built. Run 'npm run build' first.");

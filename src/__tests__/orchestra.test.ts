@@ -8,7 +8,7 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { existsSync, unlinkSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
-import { tmpdir, homedir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { registry } from "../orchestra/core/registry.js";
 import type { AgentSlot } from "../orchestra/core/types.js";
@@ -145,16 +145,22 @@ describe("orchestra registry — agents", () => {
 describe("orchestra store", () => {
   const TMP = join(tmpdir(), `dirgha-test-orch-${randomUUID().slice(0, 8)}`);
   const OLD_HOME = process.env.HOME;
+  const OLD_USERPROFILE = process.env.USERPROFILE;
   let store: typeof import("../orchestra/core/store.js");
 
   beforeAll(async () => {
     mkdirSync(TMP, { recursive: true });
     process.env.HOME = TMP;
+    // os.homedir() reads USERPROFILE on Windows.
+    process.env.USERPROFILE = TMP;
     store = await import("../orchestra/core/store.js");
   });
 
   afterAll(() => {
-    process.env.HOME = OLD_HOME ?? homedir();
+    if (OLD_HOME === undefined) delete process.env.HOME;
+    else process.env.HOME = OLD_HOME;
+    if (OLD_USERPROFILE === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = OLD_USERPROFILE;
     rmSync(TMP, { recursive: true, force: true });
   });
 
@@ -223,7 +229,9 @@ describe("orchestra store", () => {
 // ─── Log (NDJSON orchestration log) ─────────────────────────────────────
 
 describe("orchestra log", () => {
-  const SESSION = "log-test-session";
+  // Logs live in the shared OS temp directory. Use a unique session id per test so a
+  // stale file or an orphaned agent from another run cannot bleed in.
+  let SESSION: string;
   let log: typeof import("../orchestra/orchestration/log.js");
   let logFile: string;
 
@@ -232,9 +240,14 @@ describe("orchestra log", () => {
   });
 
   beforeEach(() => {
+    SESSION = `log-test-session-${randomUUID().slice(0, 8)}`;
     logFile = log.logPath(SESSION);
     if (existsSync(logFile)) unlinkSync(logFile);
     log.createLog(SESSION);
+  });
+
+  afterEach(() => {
+    if (existsSync(logFile)) unlinkSync(logFile);
   });
 
   it("createLog creates an empty file", async () => {

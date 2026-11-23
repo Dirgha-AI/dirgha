@@ -103,31 +103,114 @@ export function getOrCreateAuditKeyPair(cwd: string = process.cwd()): AuditKeyPa
 }
 
 let activePolicyEngine: PolicyEngine | null = null;
-let ledgerIndex = 0;
-let lastBlockHash = "0000000000000000000000000000000000000000000000000000000000000000";
-let ledgerInitialized = false;
+const GENESIS_HASH = "0000000000000000000000000000000000000000000000000000000000000000";
 
-function ensureLedgerInitialized(cwd: string = process.cwd()): void {
-  if (ledgerInitialized) return;
-  ledgerInitialized = true;
+interface LedgerState {
+  index: number;
+  lastBlockHash: string;
+}
+
+const ledgerStates = new Map<string, LedgerState>();
+
+function concatenateBytes(parts: readonly Uint8Array[]): Uint8Array {
+  const totalLength = parts.reduce((total, part) => total + part.byteLength, 0);
+  const result = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const part of parts) {
+    result.set(part, offset);
+    offset += part.byteLength;
+  }
+  return result;
+}
+
+function readLastLedgerEntry(auditFile: string, size: number): Record<string, unknown> {
+  const fd = fs.openSync(auditFile, "r");
+  const tailChunks: Uint8Array[] = [];
+  let position = size;
+
   try {
-    const auditFile = path.join(cwd, "data", "gateway_audit.jsonl");
-    if (fs.existsSync(auditFile)) {
-      const content = fs.readFileSync(auditFile, "utf-8").trim();
-      if (content) {
-        const lines = content.split("\n").filter((l) => l.trim().length > 0);
-        if (lines.length > 0) {
-          const lastEntry = JSON.parse(lines[lines.length - 1]);
-          if (typeof lastEntry.index === "number" && typeof lastEntry.hash === "string") {
-            ledgerIndex = lastEntry.index;
-            lastBlockHash = lastEntry.hash;
-          }
+    while (position > 0) {
+      const start = Math.max(0, position - 8192);
+      const chunk = new Uint8Array(new ArrayBuffer(position - start));
+      let bytesRead = 0;
+      while (bytesRead < chunk.length) {
+        const count = fs.readSync(fd, chunk, bytesRead, chunk.length - bytesRead, start + bytesRead);
+        if (count === 0) throw new Error("Unexpected end of file while reading the final record");
+        bytesRead += count;
+      }
+      position = start;
+
+      const suffix = concatenateBytes([chunk, ...tailChunks]);
+      let end = suffix.length;
+      while (end > 0 && (suffix[end - 1] === 0x0a || suffix[end - 1] === 0x0d)) end--;
+      const delimiter = suffix.lastIndexOf(0x0a, end - 1);
+      if (delimiter !== -1) {
+        const line = new TextDecoder().decode(suffix.subarray(delimiter + 1, end)).trim();
+        if (!line) throw new Error("The final audit ledger record is empty");
+        const parsed: unknown = JSON.parse(line);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          throw new Error("The final audit ledger record must be a JSON object");
         }
+        return parsed as Record<string, unknown>;
+      }
+
+      tailChunks.unshift(chunk);
+    }
+
+    const line = new TextDecoder().decode(concatenateBytes(tailChunks)).trim();
+    if (!line) throw new Error("The audit ledger contains no final record");
+    const parsed: unknown = JSON.parse(line);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("The final audit ledger record must be a JSON object");
+    }
+    return parsed as Record<string, unknown>;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function ensureLedgerInitialized(cwd: string = process.cwd()): { auditFile: string; state: LedgerState } {
+  const auditFile = path.resolve(cwd, "data", "gateway_audit.jsonl");
+  const existing = ledgerStates.get(auditFile);
+  if (existing) return { auditFile, state: existing };
+
+  const state: LedgerState = { index: 0, lastBlockHash: GENESIS_HASH };
+  try {
+    if (fs.existsSync(auditFile)) {
+      const stat = fs.statSync(auditFile);
+      if (stat.size > 0) {
+        const lastEntry = readLastLedgerEntry(auditFile, stat.size);
+        if (
+          !Number.isSafeInteger(lastEntry.index) ||
+          (lastEntry.index as number) < 1 ||
+          typeof lastEntry.hash !== "string" ||
+          !/^[a-f0-9]{64}$/i.test(lastEntry.hash)
+        ) {
+          throw new Error("The final audit ledger record has an invalid index or hash");
+        }
+
+        const requiredStrings = ["timestamp", "tool", "action", "target", "verdict", "reason", "prevHash"];
+        if (requiredStrings.some((field) => typeof lastEntry[field] !== "string")) {
+          throw new Error("The final audit ledger record is missing required fields");
+        }
+
+        const payload = `${lastEntry.index}|${lastEntry.timestamp}|${lastEntry.tool}|${lastEntry.action}|${lastEntry.target}|${lastEntry.verdict}|${lastEntry.reason}|${lastEntry.prevHash}`;
+        const computedHash = crypto.createHash("sha256").update(payload).digest("hex");
+        if (computedHash !== lastEntry.hash) {
+          throw new Error("The final audit ledger record hash is invalid");
+        }
+
+        state.index = lastEntry.index as number;
+        state.lastBlockHash = lastEntry.hash;
       }
     }
-  } catch {
-    // Start from genesis if unreadable
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`Cannot resume gateway audit ledger at ${auditFile}: ${detail}`, { cause: error });
   }
+
+  ledgerStates.set(auditFile, state);
+  return { auditFile, state };
 }
 
 export function getOrCreatePolicyEngine(cwd: string = process.cwd()): PolicyEngine {
@@ -249,7 +332,7 @@ export function evaluateInterceptedToolCall(
       target,
       verdict: "REFUSE",
       reason: `Blocked by WebAssembly safety gate (${gate.reason})`,
-    });
+    }, cwd);
     return {
       allowed: false,
       requiresApproval: false,
@@ -279,7 +362,7 @@ export function evaluateInterceptedToolCall(
     target,
     verdict,
     reason: decision.reason,
-  });
+  }, cwd);
 
   return {
     allowed: decision.allowed,
@@ -351,13 +434,13 @@ export function logActivity(entry: {
   target: string;
   verdict: "ALLOW" | "ESCALATE" | "REFUSE";
   reason: string;
-}): S2LedgerEntry {
-  ensureLedgerInitialized();
-  ledgerIndex++;
+}, cwd: string = process.cwd()): S2LedgerEntry {
+  const { auditFile, state } = ensureLedgerInitialized(cwd);
+  const index = state.index + 1;
   const timestamp = new Date().toISOString();
   
   // High-assurance SHA-256 cryptographic hash chaining
-  const payload = `${ledgerIndex}|${timestamp}|${entry.tool}|${entry.action}|${entry.target}|${entry.verdict}|${entry.reason}|${lastBlockHash}`;
+  const payload = `${index}|${timestamp}|${entry.tool}|${entry.action}|${entry.target}|${entry.verdict}|${entry.reason}|${state.lastBlockHash}`;
   const currentHash = crypto.createHash("sha256").update(payload).digest("hex");
 
   // Ed25519 DSSE envelope signature over the chained entry hash
@@ -366,35 +449,44 @@ export function logActivity(entry: {
   const sigHex = sig.toString("hex");
 
   const record: S2LedgerEntry = {
-    index: ledgerIndex,
+    index,
     timestamp,
     tool: entry.tool,
     action: entry.action,
     target: entry.target,
     verdict: entry.verdict,
     reason: entry.reason,
-    prevHash: lastBlockHash,
+    prevHash: state.lastBlockHash,
     hash: currentHash,
     ed25519_pubkey_hex: keyPair.pubKeyHex,
     ed25519_sig_hex: sigHex,
   };
 
-  lastBlockHash = currentHash;
-
   try {
-    const dataDir = path.join(process.cwd(), "data");
+    const dataDir = path.dirname(auditFile);
     if (!fs.existsSync(dataDir)) {
       fs.mkdirSync(dataDir, { recursive: true });
     }
-    fs.appendFileSync(
-      path.join(dataDir, "gateway_audit.jsonl"),
-      JSON.stringify(record) + "\n",
-      "utf-8"
-    );
-  } catch {
-    // Fail-safe logging
+    const fd = fs.openSync(auditFile, "a+");
+    try {
+      const size = fs.fstatSync(fd).size;
+      if (size > 0) {
+        const lastByte = new Uint8Array(new ArrayBuffer(1));
+        const bytesRead = fs.readSync(fd, lastByte, 0, 1, size - 1);
+        if (bytesRead !== 1) throw new Error("Could not verify the final audit ledger byte");
+        if (lastByte[0] !== 0x0a) fs.writeSync(fd, "\n");
+      }
+      fs.writeSync(fd, `${JSON.stringify(record)}\n`, undefined, "utf-8");
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`Cannot append to gateway audit ledger at ${auditFile}: ${detail}`, { cause: error });
   }
 
+  state.index = index;
+  state.lastBlockHash = currentHash;
   return record;
 }
 

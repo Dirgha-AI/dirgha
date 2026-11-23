@@ -72,6 +72,16 @@ export async function saveKey(
       process.stderr.write(`[keystore] Warning: could not set 0600 on ${tmp} — key file may be world-readable\n`);
     }
   }
-  await rename(tmp, path);
+  try {
+    await rename(tmp, path);
+  } catch (err: any) {
+    if (err?.code === "EPERM" || err?.code === "EBUSY" || err?.code === "EXDEV") {
+      const { copyFile, unlink } = await import("node:fs/promises");
+      await copyFile(tmp, path);
+      try { await unlink(tmp); } catch {}
+    } else {
+      throw err;
+    }
+  }
   process.env[envVar] = value;
 }

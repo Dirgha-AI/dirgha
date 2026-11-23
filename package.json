@@ -50,7 +50,9 @@
     "build:native": "node ./bin/build-native.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --dir src && node --test ./bin/dirgha.test.mjs",
+    "test": "npm run test:offline",
+    "test:offline": "vitest run --dir src --config vitest.offline.config.ts && node --test ./bin/dirgha.test.mjs",
+    "test:e2e": "vitest run --dir src --config vitest.e2e.config.ts",
     "doctor": "node ./bin/dirgha.mjs doctor",
     "verify:exa": "node scripts/verify-exa-mcp.mjs",
     "prepublishOnly": "npm run build && npm test"

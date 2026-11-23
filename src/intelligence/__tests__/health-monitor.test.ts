@@ -5,10 +5,14 @@ import { tmpdir } from "node:os";
 
 // Helper to get a temporary directory path unique per test.
 let currentTmp: string;
+const OLD_HOME = process.env.HOME;
+const OLD_USERPROFILE = process.env.USERPROFILE;
 
 beforeEach(() => {
   currentTmp = mkdtempSync(join(tmpdir(), "health-test-"));
   process.env.HOME = currentTmp;
+  // os.homedir() reads USERPROFILE on Windows.
+  process.env.USERPROFILE = currentTmp;
   // Ensure .dirgha directory exists for tests that write legacy files.
   mkdirSync(join(currentTmp, ".dirgha"), { recursive: true });
   // Clear any previous module cache so the next import is fresh.
@@ -16,6 +20,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  if (OLD_HOME === undefined) delete process.env.HOME;
+  else process.env.HOME = OLD_HOME;
+  if (OLD_USERPROFILE === undefined) delete process.env.USERPROFILE;
+  else process.env.USERPROFILE = OLD_USERPROFILE;
   if (currentTmp) {
     try {
       rmSync(currentTmp, { recursive: true, force: true });

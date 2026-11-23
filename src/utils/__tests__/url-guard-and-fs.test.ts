@@ -1,12 +1,13 @@
 /**
- * Offline unit tests for IPv6/DNS fail-closed SSRF guard, symlink workspace
- * containment, and strict sandbox fail-closed enforcement.
+ * Offline unit tests for the IPv6/DNS fail-closed SSRF guard and strict
+ * sandbox enforcement. Symlink containment requires host privileges and lives
+ * in `url-guard-symlink.e2e.test.ts`.
  *
  * Licensed under the Apache License, Version 2.0.
  */
 
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -14,7 +15,6 @@ import {
   assertSafeFetchUrlAsync,
   type DnsLookupFn,
 } from "../url-guard.js";
-import { isValidCwdPath } from "../fs.js";
 import { shellTool } from "../../tools/shell.js";
 import type { ToolContext } from "../../tools/registry.js";
 
@@ -87,33 +87,6 @@ describe("SSRF guard (IPv6, IPv4-mapped IPv6, CGNAT, metadata, DNS fail-closed)"
     await expect(
       assertSafeFetchUrlAsync("https://api.example.com/v1/gpus", publicLookup),
     ).resolves.toBeUndefined();
-  });
-});
-
-describe("Symlink-safe workspace containment (isValidCwdPath)", () => {
-  it("allows files inside workspace and blocks symlink escapes pointing outside", () => {
-    const workspace = makeTempDir("dirgha-ws-");
-    const outside = makeTempDir("dirgha-out-");
-    writeFileSync(join(outside, "secret.txt"), "top-secret", "utf8");
-    mkdirSync(join(workspace, "sub"), { recursive: true });
-    writeFileSync(join(workspace, "sub", "ok.txt"), "hello", "utf8");
-
-    const ok = isValidCwdPath(workspace, "sub/ok.txt");
-    expect(ok.valid).toBe(true);
-
-    // Create symlink inside workspace pointing outside
-    const linkPath = join(workspace, "escape-link");
-    symlinkSync(outside, linkPath);
-
-    const escaped = isValidCwdPath(workspace, "escape-link/secret.txt");
-    expect(escaped.valid).toBe(false);
-    if (!escaped.valid) {
-      expect(escaped.error).toContain("escapes workspace");
-    }
-
-    // Even a non-existent leaf under the symlinked directory must be blocked
-    const escapedNew = isValidCwdPath(workspace, "escape-link/new-file.txt");
-    expect(escapedNew.valid).toBe(false);
   });
 });
 

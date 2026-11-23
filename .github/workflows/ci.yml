@@ -36,7 +36,5 @@ jobs:
         run: npm run typecheck
       - name: Build
         run: npm run build
-      - name: Unit tests
-        run: npx vitest run --dir src
-      - name: Launcher tests
-        run: node --test ./bin/dirgha.test.mjs
+      - name: Offline unit, gateway and launcher tests
+        run: npm test

@@ -19,7 +19,7 @@ use std::fs;
 use std::io::{self, BufRead, Read, Write};
 use std::path::PathBuf;
 use std::process::Command;
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -34,6 +34,7 @@ fn main() {
         "benchmark" => run_cli_benchmark(),
         "eval-robot" => run_cli_eval_robot(),
         "gateway-demo" => run_cli_gateway_demo(),
+        "gateway" => run_cli_gateway(&args[2..]),
         "sbom-vex" => run_cli_sbom_vex(),
         "computer" => run_cli_computer(),
         "cockpit" => run_cli_cockpit(&args[2..]),
@@ -280,6 +281,42 @@ fn run_cli_sbom_vex() {
         serde_json::to_string_pretty(&att).unwrap_or_default(),
     );
     println!("{}", serde_json::to_string_pretty(&att).unwrap_or_default());
+}
+
+/// CLI Subcommand: `dirgha-native-host gateway` (Ultra-lightweight native agent gateway with zero-VM RAM usage)
+fn run_cli_gateway(args: &[String]) {
+    let mut port: u16 = 8080;
+    let mut host = "127.0.0.1".to_string();
+
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "--port" && i + 1 < args.len() {
+            port = args[i + 1].parse().unwrap_or(8080);
+            i += 2;
+        } else if args[i] == "--host" && i + 1 < args.len() {
+            host = args[i + 1].clone();
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+
+    let listener = std::net::TcpListener::bind((host.as_str(), port))
+        .expect("Failed to bind Dirgha Native Gateway TCP listener");
+    let bound_addr = listener.local_addr().expect("Local addr");
+    eprintln!("\n======================================================");
+    eprintln!("[EXPERIMENTAL] Native gateway prototype: does not proxy upstream LLM traffic.");
+    eprintln!("Use the default TypeScript gateway for production (dirgha gateway).");
+    eprintln!("⚡ Dirgha Native Micro-Gateway listening on http://{bound_addr}");
+    eprintln!("🔒 In-Process Fail-Closed LOKAHI Rust Gate (<5MB RSS, zero VM)");
+    eprintln!("📍 Claude Code endpoint: http://{bound_addr}/v1/messages");
+    eprintln!("📍 Cursor/OpenAI endpoint: http://{bound_addr}/v1/chat/completions");
+    eprintln!("======================================================\n");
+
+    let mut daemon = NativeHostDaemon::new();
+    for mut stream in listener.incoming().flatten() {
+        let _ = daemon.serve_gateway_http_once(&mut stream);
+    }
 }
 
 /// CLI Subcommand: `dirgha-native-host gateway-demo` (Executes all 3 Native Gateways end-to-end:
@@ -578,6 +615,26 @@ fn run_cli_acceptance() {
 /// Deterministic self-test & `<1 ms` (`<1000 µs`) benchmark verification across all 8 workspace crates,
 /// including on-disk persistence (`data/`), Ed25519 signature verification, and AES-256-GCM AEAD sealing.
 fn run_self_test_and_benchmark() {
+    // Self-test writes keys, ledger entries and a sealed demo vault. Run it in a
+    // disposable workspace so the command can never overwrite a user's real
+    // data/ directory (including audit-chain.jsonl and vault.sealed.json).
+    let original_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let wasm_exists = original_dir
+        .join("extensions")
+        .join("firefox-mv3")
+        .join("lokahi_gate.wasm")
+        .exists();
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let temp_root = std::env::temp_dir().join(format!(
+        "dirgha-native-self-test-{}-{nonce}",
+        std::process::id()
+    ));
+    fs::create_dir_all(temp_root.join("data")).expect("Failed to create isolated self-test workspace");
+    std::env::set_current_dir(&temp_root).expect("Failed to enter isolated self-test workspace");
+
     let data_dir = PathBuf::from("data");
     let audit_path = data_dir.join("audit-chain.jsonl");
     let mgp_path = data_dir.join("mgp-store.json");
@@ -671,7 +728,6 @@ fn run_self_test_and_benchmark() {
         .map(|a| a.len())
         .unwrap_or(0);
 
-    let wasm_exists = PathBuf::from("extensions/firefox-mv3/lokahi_gate.wasm").exists();
     let keys_exist = PathBuf::from("data/keys/lokahi_ed25519.key").exists()
         && PathBuf::from("data/keys/flywheel_ed25519.key").exists();
 
@@ -695,5 +751,7 @@ fn run_self_test_and_benchmark() {
         "persistent_ed25519_keys_generated": keys_exist,
         "mcp_tools_registered": tool_count
     });
+    let _ = std::env::set_current_dir(&original_dir);
+    let _ = fs::remove_dir_all(&temp_root);
     println!("{}", serde_json::to_string_pretty(&report).unwrap_or_default());
 }

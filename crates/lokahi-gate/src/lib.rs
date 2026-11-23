@@ -1263,11 +1263,14 @@ mod tests {
         tampered.entries[0].ed25519_pubkey_hex = hex::encode(other.verifying_key().to_bytes());
         tampered.entries[0].ed25519_sig_hex = hex::encode(other.sign(tampered.entries[0].entry_hash.as_bytes()).to_bytes());
         assert!(!tampered.verify_chain_with_trusted_key(&trusted));
-        let path = Path::new("data/dirgha_test_audit_chain.jsonl");
-        ledger.save_to_path(path).unwrap();
-        let loaded = AuditLedger::load_and_verify_from_path_with_trusted_key(path, &trusted).unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "dirgha_test_audit_chain_{}.jsonl",
+            std::process::id()
+        ));
+        ledger.save_to_path(&path).unwrap();
+        let loaded = AuditLedger::load_and_verify_from_path_with_trusted_key(&path, &trusted).unwrap();
         assert_eq!(loaded.entries().len(), 2);
-        let _ = fs::remove_file(path);
+        let _ = fs::remove_file(&path);
     }
 
     #[test]

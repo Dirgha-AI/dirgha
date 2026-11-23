@@ -38,7 +38,7 @@ The shipped state and the binding contract for what comes next.
 
 - Every src file ≤ 200 lines.
 - Every parity-matrix row closure cites a code path and a test.
-- Every sprint ends with `npx vitest run --dir src` green (currently 472/472).
+- Every sprint ends with `npm test` green (offline unit, gateway, and launcher suites). Live-network and platform-specific checks run separately via `npm run test:e2e`.
 - Soul and tone are not changed without explicit user request.
 - No competitor names in code comments, file content, or stdout/stderr messages.
 
@@ -46,6 +46,6 @@ The shipped state and the binding contract for what comes next.
 
 1. Read `docs/ARCHITECTURE.md` for the kernel + provider model.
 2. Read `docs/cli/index/index.md` for the full feature index.
-3. Run `npx vitest run --dir src` to confirm the green baseline (472 passing).
+3. Run `npm test` to confirm the offline green baseline.
 4. Write or extend a test before changing code.
 5. Open an issue or PR with the proposal.

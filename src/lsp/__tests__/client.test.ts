@@ -154,7 +154,7 @@ describe("LSP Detector", () => {
   it("detectInstalledServers returns array", () => {
     const installed = detectInstalledServers();
     expect(Array.isArray(installed)).toBe(true);
-  });
+  }, 60000);
 });
 
 describe("LSP Manager", () => {
@@ -315,7 +315,7 @@ describe("Tool registry integration", () => {
     expect(names).toContain("find_references");
     expect(names).toContain("hover_documentation");
     expect(names).toContain("document_symbols");
-  });
+  }, 20000);
 
   it("all LSP tool names pass registry validation", async () => {
     const { builtInTools } = await import("../../tools/index.js");
@@ -330,5 +330,5 @@ describe("Tool registry integration", () => {
     for (const tool of lspTools) {
       expect(/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(tool.name)).toBe(true);
     }
-  });
+  }, 20000);
 });

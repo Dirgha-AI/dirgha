@@ -94,7 +94,7 @@ exit
 
 ## Test floor
 
-`npm run test:cli:offline` — **38 / 38 green in 16 s.** No row in the parity matrix closes without a test that locks it in. 3 network suites (`hooks`, `cancel`, `provider_matrix`) gated on API keys.
+`npm test` runs the deterministic offline suite: TypeScript unit and gateway tests plus the launcher routing tests. Live API probes, npm registry access, and host-specific symlink tests are isolated under `npm run test:e2e`. No row in the parity matrix closes without a test that locks it in.
 
 ## Extending dirgha
 

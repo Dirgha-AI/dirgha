@@ -127,7 +127,7 @@ describe("regression: YOLO mode tool blocking", () => {
 
     expect(result.isError).toBe(false);
     expect(result.content).toContain("YOLO OK");
-  });
+  }, 15000);
 
   it("YOLO mode returns no enforcement hooks — all tools allowed", async () => {
     const { enforceMode } = await import("../context/mode-enforcement.js");

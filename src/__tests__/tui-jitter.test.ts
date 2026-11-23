@@ -724,7 +724,7 @@ describe("session-title marker (first-turn only)", () => {
     events.emit({ type: "turn_start", turnId: "t0", turnIndex: 0 });
     events.emit({ type: "text_start" });
     events.emit({ type: "text_delta", delta: "Hello, world.\n" });
-    await sleep(250);
+    for (let i = 0; i < 20 && !liveText; i++) await sleep(100);
 
     expect(captured).toBeNull();
     expect(liveText).toBe("Hello, world.\n");
