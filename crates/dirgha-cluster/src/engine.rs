@@ -109,7 +109,7 @@ impl ClusterEngine {
         Ok(partitions)
     }
 
-    pub fn step_forward(&self, session_id: u64, step_index: u32, input_activation: &[u8]) -> TensorFrame {
+    pub fn step_forward(&self, session_id: u64, sequence_nonce: u64, step_index: u32, input_activation: &[u8]) -> TensorFrame {
         // Simulates passing the activation through the locally assigned layer slice
         let assigned = self.active_partitions
             .iter()
@@ -120,6 +120,7 @@ impl ClusterEngine {
         TensorFrame {
             packet_type: PacketType::ActivationForward,
             session_id,
+            sequence_nonce,
             step_index,
             layer_index: assigned.end_layer as u16,
             hidden_dimension: 8192,

@@ -11,4 +11,4 @@ pub mod transport;
 pub use discovery::{ClusterAuth, ClusterNode, ClusterTopology, ComputeBackend};
 pub use engine::{ClusterEngine, ClusterRole, ClusterStatus};
 pub use partitioner::{partition_layers, LayerRange, NodePartition};
-pub use transport::{PacketType, TensorFrame, DIRGHA_MAGIC, PROTOCOL_VERSION};
+pub use transport::{PacketType, TensorFrame, DIRGHA_MAGIC, HEADER_SIZE, PROTOCOL_VERSION};

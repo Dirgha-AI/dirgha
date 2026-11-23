@@ -70,6 +70,8 @@ Commands:
                                  Initialize a new local inference cluster leader
   join <peer_addr> --token=<tok> [--json]
                                  Join an existing peer inference cluster
+  serve [--port=54125] [--host=127.0.0.1]
+                                 Start the live cluster coordinator HTTP/SSE daemon
   status [--json]                View cluster topology, pooled VRAM, and active nodes
   partition <layers> <size_gb> [--json]
                                  Calculate optimal layer cuts across current nodes
@@ -98,6 +100,21 @@ export async function runCluster(argv: string[], _ctx: SubcommandCtx): Promise<n
   const isJson = Boolean(flags.json);
 
   switch (action) {
+    case "serve":
+    case "start": {
+      const port = Number(flags.port) || 54125;
+      const host = (flags.host as string) || "127.0.0.1";
+      const { ClusterDaemon } = await import("../../cluster/daemon.js");
+      const daemon = new ClusterDaemon({ port, host });
+      await daemon.start();
+      stdout.write(`\n🛡️  Dirgha Cluster Coordinator live on http://${host}:${port}\n`);
+      stdout.write(`  Endpoints:\n`);
+      stdout.write(`  • OpenAI:    http://${host}:${port}/v1/chat/completions\n`);
+      stdout.write(`  • Anthropic: http://${host}:${port}/v1/messages\n`);
+      stdout.write(`  • Health:    http://${host}:${port}/v1/health\n\n`);
+      return 0;
+    }
+
     case "init": {
       const name = (flags.name as string) || "dirgha-cluster";
       const port = Number(flags.port) || 54125;
@@ -123,7 +140,13 @@ export async function runCluster(argv: string[], _ctx: SubcommandCtx): Promise<n
 
       saveClusterState(state);
 
-      const joinToken = `dirgha-join_${clusterId}:${Math.floor(Date.now() / 1000) + 86400}:local:mock_sig`;
+      const { generateKeyPairSync, sign: cryptoSign } = await import("node:crypto");
+      const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+      const rawPub = publicKey.export({ type: "spki", format: "der" }).subarray(-32);
+      const expireSec = Math.floor(Date.now() / 1000) + 86400;
+      const msg = Buffer.from(`${clusterId}:${expireSec}`);
+      const sig = cryptoSign(null, msg as any, privateKey);
+      const joinToken = `dirgha-join_${clusterId}:${expireSec}:${rawPub.toString("hex")}:${sig.toString("hex")}`;
 
       if (isJson) {
         stdout.write(JSON.stringify({ status: "ok", clusterId, name, port, joinToken }, null, 2) + "\n");
@@ -146,9 +169,43 @@ export async function runCluster(argv: string[], _ctx: SubcommandCtx): Promise<n
         return 1;
       }
 
+      const parts = token.replace(/^dirgha-join_/, "").split(":");
+      if (parts.length !== 4) {
+        stderr.write("Error: Invalid join token format. Expected dirgha-join_<clusterId>:<expire>:<pubkey_hex>:<sig_hex>\n");
+        return 1;
+      }
+      const [clusterId, expireStr, pubHex, sigHex] = parts;
+      const expireSec = Number(expireStr);
+      if (Math.floor(Date.now() / 1000) > expireSec) {
+        stderr.write("Error: Join token has expired.\n");
+        return 1;
+      }
+
+      try {
+        const pubBuf = Buffer.from(pubHex, "hex");
+        const sigBuf = Buffer.from(sigHex, "hex");
+        if (pubBuf.length !== 32 || sigBuf.length !== 64) {
+          stderr.write("Error: Invalid Ed25519 public key or signature length in token.\n");
+          return 1;
+        }
+        const { createPublicKey, verify: cryptoVerify } = await import("node:crypto");
+        const spkiHeader = Buffer.from("302a300506032b6570032100", "hex");
+        const spki = Buffer.concat([spkiHeader as any, pubBuf as any]);
+        const pubKey = createPublicKey({ key: spki as any, format: "der", type: "spki" });
+        const msg = Buffer.from(`${clusterId}:${expireSec}`);
+        const valid = cryptoVerify(null, msg as any, pubKey, sigBuf as any);
+        if (!valid) {
+          stderr.write("Error: Join token Ed25519 signature verification failed.\n");
+          return 1;
+        }
+      } catch (err) {
+        stderr.write(`Error: Failed to verify join token: ${err instanceof Error ? err.message : String(err)}\n`);
+        return 1;
+      }
+
       const localNodeId = `node_${Math.random().toString(16).slice(2, 10)}`;
       const state: ClusterState = {
-        clusterId: token.split(":")[0]?.replace("dirgha-join_", "") || "joined_cluster",
+        clusterId,
         clusterName: "peer-cluster",
         role: "worker",
         localNodeId,

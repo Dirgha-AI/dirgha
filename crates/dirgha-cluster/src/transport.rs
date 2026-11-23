@@ -5,6 +5,7 @@ use thiserror::Error;
 
 pub const DIRGHA_MAGIC: u32 = 0x44495247; // 'DIRG'
 pub const PROTOCOL_VERSION: u16 = 1;
+pub const HEADER_SIZE: usize = 70;
 
 #[derive(Debug, Error)]
 pub enum TransportError {
@@ -49,6 +50,7 @@ impl TryFrom<u8> for PacketType {
 pub struct TensorFrame {
     pub packet_type: PacketType,
     pub session_id: u64,
+    pub sequence_nonce: u64,
     pub step_index: u32,
     pub layer_index: u16,
     pub hidden_dimension: u32,
@@ -57,25 +59,28 @@ pub struct TensorFrame {
 
 impl TensorFrame {
     /// Encodes a tensor activation frame into wire binary format:
-    /// [Magic: 4B][Ver: 2B][Type: 1B][Reserved: 1B][Session: 8B][Step: 4B][Layer: 2B][HiddenDim: 4B][PayloadLen: 4B][CRC/Hash: 4B][Payload: NB]
+    /// [Magic: 4B][Ver: 2B][Type: 1B][Reserved: 1B][Session: 8B][SeqNonce: 8B][Step: 4B][Layer: 2B][HiddenDim: 4B][PayloadLen: 4B][Blake3: 32B][Payload: NB]
     pub fn encode(&self) -> Vec<u8> {
         let payload_len = self.tensor_payload.len() as u32;
-        let mut buf = Vec::with_capacity(34 + self.tensor_payload.len());
+        let mut buf = Vec::with_capacity(HEADER_SIZE + self.tensor_payload.len());
 
         buf.extend_from_slice(&DIRGHA_MAGIC.to_be_bytes());
         buf.extend_from_slice(&PROTOCOL_VERSION.to_be_bytes());
         buf.push(self.packet_type as u8);
         buf.push(0); // Reserved
         buf.extend_from_slice(&self.session_id.to_be_bytes());
+        buf.extend_from_slice(&self.sequence_nonce.to_be_bytes());
         buf.extend_from_slice(&self.step_index.to_be_bytes());
         buf.extend_from_slice(&self.layer_index.to_be_bytes());
         buf.extend_from_slice(&self.hidden_dimension.to_be_bytes());
         buf.extend_from_slice(&payload_len.to_be_bytes());
 
-        // Simple fast 4-byte checksum using blake3 truncation
-        let hash = blake3::hash(&self.tensor_payload);
-        let checksum: [u8; 4] = hash.as_bytes()[..4].try_into().unwrap();
-        buf.extend_from_slice(&checksum);
+        // Full 32-byte Blake3 checksum across header metadata (0..38) and payload
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(&buf[..38]);
+        hasher.update(&self.tensor_payload);
+        let hash = hasher.finalize();
+        buf.extend_from_slice(hash.as_bytes());
 
         buf.extend_from_slice(&self.tensor_payload);
         buf
@@ -83,9 +88,9 @@ impl TensorFrame {
 
     /// Decodes a tensor activation frame from wire binary format.
     pub fn decode(bytes: &[u8]) -> Result<Self, TransportError> {
-        if bytes.len() < 34 {
+        if bytes.len() < HEADER_SIZE {
             return Err(TransportError::LengthMismatch {
-                expected: 34,
+                expected: HEADER_SIZE,
                 actual: bytes.len(),
             });
         }
@@ -102,28 +107,34 @@ impl TensorFrame {
 
         let packet_type = PacketType::try_from(bytes[6])?;
         let session_id = u64::from_be_bytes(bytes[8..16].try_into().unwrap());
-        let step_index = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
-        let layer_index = u16::from_be_bytes(bytes[20..22].try_into().unwrap());
-        let hidden_dimension = u32::from_be_bytes(bytes[22..26].try_into().unwrap());
-        let payload_len = u32::from_be_bytes(bytes[26..30].try_into().unwrap()) as usize;
-        let expected_checksum = &bytes[30..34];
+        let sequence_nonce = u64::from_be_bytes(bytes[16..24].try_into().unwrap());
+        let step_index = u32::from_be_bytes(bytes[24..28].try_into().unwrap());
+        let layer_index = u16::from_be_bytes(bytes[28..30].try_into().unwrap());
+        let hidden_dimension = u32::from_be_bytes(bytes[30..34].try_into().unwrap());
+        let payload_len = u32::from_be_bytes(bytes[34..38].try_into().unwrap()) as usize;
+        let expected_checksum = &bytes[38..70];
 
-        if bytes.len() < 34 + payload_len {
+        if bytes.len() < HEADER_SIZE + payload_len {
             return Err(TransportError::LengthMismatch {
-                expected: 34 + payload_len,
+                expected: HEADER_SIZE + payload_len,
                 actual: bytes.len(),
             });
         }
 
-        let payload = bytes[34..34 + payload_len].to_vec();
-        let hash = blake3::hash(&payload);
-        if &hash.as_bytes()[..4] != expected_checksum {
+        let payload = bytes[HEADER_SIZE..HEADER_SIZE + payload_len].to_vec();
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(&bytes[..38]);
+        hasher.update(&payload);
+        let hash = hasher.finalize();
+
+        if hash.as_bytes() != expected_checksum {
             return Err(TransportError::ChecksumFailed);
         }
 
         Ok(Self {
             packet_type,
             session_id,
+            sequence_nonce,
             step_index,
             layer_index,
             hidden_dimension,
@@ -142,6 +153,7 @@ mod tests {
         let frame = TensorFrame {
             packet_type: PacketType::ActivationForward,
             session_id: 123456789,
+            sequence_nonce: 101,
             step_index: 42,
             layer_index: 26,
             hidden_dimension: 8192,
@@ -149,14 +161,37 @@ mod tests {
         };
 
         let encoded = frame.encode();
-        assert_eq!(encoded.len(), 34 + 16384);
+        assert_eq!(encoded.len(), HEADER_SIZE + 16384);
 
         let decoded = TensorFrame::decode(&encoded).expect("decode must succeed");
         assert_eq!(decoded.packet_type, PacketType::ActivationForward);
         assert_eq!(decoded.session_id, 123456789);
+        assert_eq!(decoded.sequence_nonce, 101);
         assert_eq!(decoded.step_index, 42);
         assert_eq!(decoded.layer_index, 26);
         assert_eq!(decoded.hidden_dimension, 8192);
         assert_eq!(decoded.tensor_payload.len(), 16384);
+    }
+
+    #[test]
+    fn test_tampered_frame_detection() {
+        let frame = TensorFrame {
+            packet_type: PacketType::ActivationForward,
+            session_id: 123456789,
+            sequence_nonce: 1,
+            step_index: 1,
+            layer_index: 0,
+            hidden_dimension: 4096,
+            tensor_payload: vec![1, 2, 3, 4],
+        };
+        let mut encoded = frame.encode();
+        // Tamper with sequence nonce in header
+        encoded[16] ^= 0xFF;
+        assert!(matches!(TensorFrame::decode(&encoded), Err(TransportError::ChecksumFailed)));
+
+        // Tamper with payload
+        let mut encoded2 = frame.encode();
+        encoded2[HEADER_SIZE] ^= 0xFF;
+        assert!(matches!(TensorFrame::decode(&encoded2), Err(TransportError::ChecksumFailed)));
     }
 }

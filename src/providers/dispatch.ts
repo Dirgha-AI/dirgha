@@ -174,6 +174,7 @@ export function isKnownProvider(id: string): id is ProviderId {
     id === "groq" ||
     id === "zai" ||
     id === "machine1" ||
+    id === "cluster" ||
     id === "dirgha"
   );
 }

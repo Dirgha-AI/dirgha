@@ -130,6 +130,7 @@ describe("isKnownProvider", () => {
     expect(isKnownProvider("nvidia")).toBe(true);
     expect(isKnownProvider("openrouter")).toBe(true);
     expect(isKnownProvider("anthropic")).toBe(true);
+    expect(isKnownProvider("cluster")).toBe(true);
   });
   it("rejects unknown", () => {
     expect(isKnownProvider("bedrock")).toBe(false);

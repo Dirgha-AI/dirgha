@@ -47,12 +47,16 @@ impl ClusterTopology {
     pub fn new(cluster_name: &str, leader: ClusterNode) -> Self {
         let cluster_id = format!("cluster_{}", blake3::hash(cluster_name.as_bytes()).to_hex().as_str()[..16].to_string());
         let leader_id = leader.node_id.clone();
+        let created_at_unix_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
         Self {
             cluster_id,
             cluster_name: cluster_name.to_string(),
             leader_node_id: leader_id,
             nodes: vec![leader],
-            created_at_unix_ms: 0,
+            created_at_unix_ms,
         }
     }
 
@@ -86,7 +90,12 @@ impl ClusterAuth {
         format!("dirgha-join_{}:{}:{}:{}", cluster_id, expire_unix_sec, pubkey_hex, sig_hex)
     }
 
-    pub fn verify_join_token(token: &str, expected_cluster_id: &str, current_unix_sec: u64) -> Result<(), DiscoveryError> {
+    pub fn verify_join_token(
+        token: &str,
+        expected_cluster_id: &str,
+        current_unix_sec: u64,
+        trusted_leader_pubkey: Option<&[u8; 32]>,
+    ) -> Result<(), DiscoveryError> {
         let trimmed = token.strip_prefix("dirgha-join_").ok_or(DiscoveryError::InvalidTokenFormat)?;
         let parts: Vec<&str> = trimmed.split(':').collect();
         if parts.len() != 4 {
@@ -107,6 +116,13 @@ impl ClusterAuth {
 
         let pubkey_bytes = hex::decode(pubkey_hex).map_err(|_| DiscoveryError::InvalidTokenFormat)?;
         let pubkey_arr: [u8; 32] = pubkey_bytes.try_into().map_err(|_| DiscoveryError::InvalidTokenFormat)?;
+
+        if let Some(trusted) = trusted_leader_pubkey {
+            if &pubkey_arr != trusted {
+                return Err(DiscoveryError::VerificationFailed("Untrusted leader public key".into()));
+            }
+        }
+
         let verifying_key = VerifyingKey::from_bytes(&pubkey_arr).map_err(|e| DiscoveryError::VerificationFailed(e.to_string()))?;
 
         let sig_bytes = hex::decode(sig_hex).map_err(|_| DiscoveryError::InvalidTokenFormat)?;
@@ -116,5 +132,38 @@ impl ClusterAuth {
         let msg = format!("{}:{}", cluster_id, expire_sec);
         verifying_key.verify(msg.as_bytes(), &signature)
             .map_err(|e| DiscoveryError::VerificationFailed(format!("Signature invalid: {}", e)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_join_token_lifecycle() {
+        let key_bytes = [0x42u8; 32];
+        let signing_key = SigningKey::from_bytes(&key_bytes);
+        let pubkey = *signing_key.verifying_key().as_bytes();
+        let cluster_id = "cluster_12345678abcdef";
+        let expire_sec = 2000000000;
+
+        let token = ClusterAuth::generate_join_token(&signing_key, cluster_id, expire_sec);
+        assert!(token.starts_with("dirgha-join_cluster_12345678abcdef:"));
+
+        // Valid verification with trusted key
+        assert!(ClusterAuth::verify_join_token(&token, cluster_id, 1999999999, Some(&pubkey)).is_ok());
+
+        // Valid verification without explicit trusted key
+        assert!(ClusterAuth::verify_join_token(&token, cluster_id, 1999999999, None).is_ok());
+
+        // Expired token rejection
+        assert!(ClusterAuth::verify_join_token(&token, cluster_id, 2000000001, Some(&pubkey)).is_err());
+
+        // Cluster ID mismatch rejection
+        assert!(ClusterAuth::verify_join_token(&token, "cluster_other", 1999999999, Some(&pubkey)).is_err());
+
+        // Untrusted leader key rejection
+        let fake_key = [0x99; 32];
+        assert!(ClusterAuth::verify_join_token(&token, cluster_id, 1999999999, Some(&fake_key)).is_err());
     }
 }
