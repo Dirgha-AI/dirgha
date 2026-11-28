@@ -9,7 +9,7 @@
 - **Arniko security scanning:** Opt-in pre-commit and agent-output secret hooks (`dirgha-builtin-secrets` with automatic value redaction) plus honest orchestration of locally installed `gitleaks`, `semgrep`, and `trivy` emitting OASIS SARIF v2.1.0.
 - **Open GPU Cloud Market:** Multi-cloud GPU discovery (`dirgha gpu find`), residency/compliance filtering (`soc2`, `iso27001`, `dpdp`, `gdpr`), RFC-4180 chargeback CSV exports, and open third-party provider onboarding (`specs/GPU_PROVIDER_SCHEMA.json` + starter server).
 - **Exa MCP search & MCP kernel:** Official keyless Exa MCP (`web_search_exa`, `web_fetch_exa`) registered in `.mcp.json`, plus a Rust native kernel (`dirgha-native-host`) serving 24 MCP tools over stdio (six robotics/hardware demo tools honestly return `"simulated": true`).
-- **Private sovereign deployment:** Local Control Plane UI (`npm run dev`), Docker Compose stack (`docker-compose.private-stack.yml`), and hardened Kubernetes manifests (`deploy/k8s/dirgha-enterprise.yaml`).
+- **Private sovereign deployment:** Local Control Plane UI (`npm run dev`) and the published Docker Compose template (`docker-compose.private-stack.example.yml`). The hardened Compose bundle and Kubernetes manifests ship to enterprise customers.
 
 ## Start here
 - [README](https://github.com/Dirgha-AI/dirgha/blob/main/README.md): overview, pain points solved, progressive governance profiles, quick start, FAQ
@@ -25,7 +25,7 @@
 - [Exa search](https://github.com/Dirgha-AI/dirgha/blob/main/docs/exa-search.md): official Exa MCP setup and `npm run verify:exa`
 - [Safety model](https://github.com/Dirgha-AI/dirgha/blob/main/docs/safety.md): WebAssembly gate, S2 approvals, signed ledger
 - [MCP tools](https://github.com/Dirgha-AI/dirgha/blob/main/docs/mcp-tools.md): all 24 native kernel MCP tools
-- [Kubernetes deployment](https://github.com/Dirgha-AI/dirgha/blob/main/deploy/k8s/README.md): restricted Pod Security private stack deployment
+- [Private stack template](https://github.com/Dirgha-AI/dirgha/blob/main/docker-compose.private-stack.example.yml): published Compose starter; hardened Kubernetes manifests ship to enterprise customers
 - [Robotics](https://github.com/Dirgha-AI/dirgha/blob/main/docs/robotics.md): MuJoCo evaluation and simulation workflows
 - [Local models](https://github.com/Dirgha-AI/dirgha/blob/main/docs/local-models.md): Ollama and llama.cpp setup
 - [Fleet tutorial](https://github.com/Dirgha-AI/dirgha/blob/main/docs/tutorials/fleet.md): parallel agents in git worktrees

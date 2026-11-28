@@ -12,7 +12,7 @@ The shipped state and the binding contract for what comes next.
 - ✓ Commercial Open GPU Cloud Market (`src/gpu/`): smart cheapest-compliant GPU router (`dirgha gpu find`), open third-party provider onboarding (`specs/GPU_PROVIDER_SCHEMA.json`, `dirgha gpu init-manifest|certify|register`), RFC-4180 finance chargeback CSV export (`dirgha gpu chargeback`), and zero-dependency partner starter server (`examples/gpu-provider-starter/`)
 - ✓ Opt-in Arniko security automation (`dirgha scan` + `src/security/arniko-hooks.ts`): zero-dependency `dirgha-builtin-secrets` scanner with credential redaction, `onAgentOutput`/`onPreCommit` runtime hooks (bypassed in `developer` profile), honest external CLI detection (`gitleaks`/`semgrep`/`trivy`), OASIS SARIF v2.1.0 output, and Ahimsa-to-LOKAHI manifest bridge
 - ✓ Multi-tab Enterprise Control Plane UI (`data/cockpit.html` + `scripts/dev-server.mjs`): live Governance & Compliance Evidence Pack generator, Open GPU Cloud Market certifier, Arniko SARIF secret scanner, and Physical AI/MuJoCo hardware viewport
-- ✓ Production release & deployment engineering: cross-platform Rust kernel + `lokahi_gate.wasm` + SHA-256 GitHub Release workflow (`.github/workflows/publish.yml`), Docker Compose private stack (`docker-compose.private-stack.yml`), and hardened Kubernetes manifests (`deploy/k8s/dirgha-enterprise.yaml`)
+- ✓ Production release & deployment engineering: cross-platform Rust kernel + `lokahi_gate.wasm` + SHA-256 GitHub Release workflow (`.github/workflows/publish.yml`), the published Docker Compose private-stack template (`docker-compose.private-stack.example.yml`), and hardened Kubernetes manifests delivered to enterprise customers
 - ✓ Multi-provider agent loop: 14+ provider families + any OpenAI-compatible/Ollama endpoint, BYOK pool with priority + LRU + cooldown + 4-tier failover cascade
 - ✓ Ink TUI with streaming markdown, tool approvals, paste collapse, and virtualized transcript
 - ✓ 29 built-in tools & 38 subcommands across `act`/`plan`/`verify`/`ask` modes
@@ -23,7 +23,7 @@ The shipped state and the binding contract for what comes next.
 
 - **Real robotics policy & hardware adapters**: replace remaining `"simulated": true` demo tools with real VLA inference, LeRobot Hub push, and hardware CAD/manufacturing integrations behind S2 approvals.
 - **Public GPU Cloud Partner Directory**: automated nightly health/latency certification for third-party providers implementing `specs/GPU_PROVIDER_SCHEMA.json`.
-- **Enterprise Terraform modules & Helm chart repo**: signed OCI Helm chart publication complementing `deploy/k8s/dirgha-enterprise.yaml`.
+- **Enterprise Terraform modules & Helm chart repo**: signed OCI Helm chart publication complementing the private Kubernetes manifests delivered to customers.
 
 ## On deck
 

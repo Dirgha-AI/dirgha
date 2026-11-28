@@ -56,7 +56,7 @@ Switch profiles per run (`--profile team`, `--lokahi`, `--arniko`), turn modules
 - **Enforce signed tool boundaries (LOKAHI):** Sign tool and argument policies with RFC-8785 canonical JSON and Ed25519 keys (`dirgha policy keygen|init|sign|verify`), require dual-control S2 approvals for irreversible actions (`dirgha policy approve`), and export auditor-ready compliance evidence packs (`dirgha policy evidence`).
 - **Catch leaked secrets before they land (Arniko):** Run `dirgha scan --builtin --sarif` offline or orchestrate locally installed `gitleaks`, `semgrep`, and `trivy` binaries to emit OASIS SARIF v2.1.0 reports for GitHub, GitLab, and Azure DevOps. Missing scanner CLIs are reported honestly—never faked.
 - **Route GPU jobs across an Open GPU Cloud Market:** Find the cheapest compliant GPU across RunPod, Vast.ai, Spheron, Akash, and certified third-party clouds (`dirgha gpu find`), enforce data-residency jurisdictions and hourly caps, onboard new cloud providers via `specs/GPU_PROVIDER_SCHEMA.json`, and export RFC-4180 finance chargeback CSVs (`dirgha gpu chargeback --csv`).
-- **Deploy as a private sovereign stack:** Run the multi-tab Governance, GPU Market, Arniko SARIF, and Physical AI Control Plane locally (`npm run dev`), on Docker Compose (`docker-compose.private-stack.yml`), or on Kubernetes (`deploy/k8s/dirgha-enterprise.yaml`).
+- **Deploy as a private sovereign stack:** Run the multi-tab Governance, GPU Market, Arniko SARIF, and Physical AI Control Plane locally (`npm run dev`), or start from the published [`docker-compose.private-stack.example.yml`](docker-compose.private-stack.example.yml) template. The hardened private stack — the full Compose bundle and the Kubernetes manifests for EKS, GKE, AKS and air-gapped on-prem — ships to enterprise customers and is not published in this repository.
 
 ### For robotics and physical-AI teams
 - **Evaluate in MuJoCo:** Run seeded rollouts (`dirgha eval-robot`) with confidence intervals, failure categorization, and HTML replays, or drive simulations step by step over MCP.
@@ -142,7 +142,7 @@ We would rather tell you what is production-ready and what is still a demo than 
 
 - **Core shipping wedge:** The TypeScript coding agent, multi-provider BYOK/Ollama routing, git-worktree fleet runs, the TypeScript policy gateway, LOKAHI policy signing/conformance/evidence tools, Arniko built-in secret scanner + SARIF export, and Exa MCP integration.
 - **Gateway engines:** `dirgha gateway` and `dirgha proxy` always use the TypeScript gateway. The native Rust gateway is an experimental R&D prototype that does not proxy upstream LLM traffic; it requires an explicit opt-in flag.
-- **Experimental preview / simulation tracks:** The Open GPU Cloud Market router/certifier, enterprise Control Plane/cockpit, Docker/Kubernetes private-stack templates, and physical-AI/robotics tooling are available for evaluation but are not part of the core production support claim.
+- **Experimental preview / simulation tracks:** The Open GPU Cloud Market router/certifier, enterprise Control Plane/cockpit, the published private-stack Compose template, and physical-AI/robotics tooling are available for evaluation but are not part of the core production support claim.
 - **Simulated demo tools (clearly labeled):** Six robotics/hardware MCP tools—`dirgha_policy_infer`, `physical_ai_vla_infer`, `hf_lerobot_dataset_sync`, `hardware_cad_pcb_generate`, `hardware_vendor_quote_order`, and `robotics_skill_invoke`—demonstrate the interface without calling external hardware vendors and always return `"simulated": true`.
 - **Independent audit pending:** Dirgha has not yet undergone a third-party penetration test. Treat it as defense-in-depth alongside your OS, container, and network isolation.
 
@@ -170,7 +170,7 @@ Use the `enterprise` profile with a read-only `/etc/dirgha/policy.json` lock, si
 | [Exa search](docs/exa-search.md) | Keyless web search and clean page fetch via Exa MCP |
 | [Safety model](docs/safety.md) | Fail-closed WASM gate, S2 approvals, signed ledger |
 | [MCP tools](docs/mcp-tools.md) | Reference for all 24 kernel MCP tools |
-| [Kubernetes deployment](deploy/k8s/README.md) | Hardened private-stack deployment for EKS, GKE, AKS, and on-prem |
+| [Private stack template](docker-compose.private-stack.example.yml) | Starter Compose file; hardened EKS, GKE, AKS and on-prem manifests ship to enterprise customers |
 | [Robotics](docs/robotics.md) | MuJoCo evaluation and simulation workflows |
 | [Local models](docs/local-models.md) | Running offline with Ollama and llama.cpp |
 | [Fleet](docs/tutorials/fleet.md) and [Sub-agents](docs/tutorials/subagents.md) | Parallel git-worktree agents and task delegation |

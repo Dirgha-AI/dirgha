@@ -34,3 +34,9 @@ data/*.jsonl
 .env.*
 !.env.example
 .playwright-cli/
+
+# Private enterprise stack and internal benchmark output — ships to customers,
+# never in the public tree. Commit docker-compose.private-stack.example.yml instead.
+docker-compose.private-stack.yml
+deploy/k8s/*enterprise*
+/results/

@@ -119,20 +119,21 @@ See `docs/gpu-cloud-market.md` for the full provider certification guide.
 |---|---|---|
 | **Open Core (OSS)** | Apache-2.0 (`@dirgha/code`) | Full coding CLI/TUI, 29 tools, 38 subcommands, 24-tool Rust MCP kernel, local WASM gate, Open GPU Cloud Market SDK |
 | **Team** | Commercial Support & Rule Packs | Curated LOKAHI policy packs, Arniko pre-commit hooks & CI SARIF templates, multi-provider GPU budget & chargeback CSVs |
-| **Enterprise Sovereign** | Private Stack (`docker-compose.private-stack.yml` + `deploy/k8s/`) | Org Policy Lock rollout, Ed25519 manifest signing, air-gapped local LLM + private GPU cluster routing, auditor evidence exports |
+| **Enterprise Sovereign** | Private Stack (delivered to customers; public starter at `docker-compose.private-stack.example.yml`) | Org Policy Lock rollout, Ed25519 manifest signing, air-gapped local LLM + private GPU cluster routing, auditor evidence exports |
 | **Robotics Integrator (SAT)** | Enterprise + Physical-AI Pack | MuJoCo CI harnesses, hardware S2 approval workflows, Control Plane mobile approvals, custom actuator/VLA adapters |
 | **GPU Cloud Partner Program** | Certified Provider Listing | Reference starter server (`examples/gpu-provider-starter/`), certification against `specs/GPU_PROVIDER_SCHEMA.json`, marketplace listing |
 
-## 8. Quickstart Private Stack Deployment (Docker Compose & Kubernetes)
+## 8. Quickstart Private Stack Deployment (Docker Compose)
 
 ```bash
-# Docker Compose (single host / workstation / VM)
+# Docker Compose (single host / workstation / VM) — the published template is a working starter
 cp .env.example .env
-docker compose -f docker-compose.private-stack.yml up -d
+docker compose -f docker-compose.private-stack.example.yml up -d
 # With optional local Ollama + Arniko scanner worker:
-docker compose -f docker-compose.private-stack.yml --profile local-llm --profile security up -d
-
-# Kubernetes (EKS / GKE / AKS / Air-Gapped On-Prem)
-kubectl apply -f deploy/k8s/dirgha-enterprise.yaml
-# See deploy/k8s/README.md for Secret & signed manifest mounting instructions
+docker compose -f docker-compose.private-stack.example.yml --profile local-llm --profile security up -d
 ```
+
+The production-configured Compose bundle and the hardened Kubernetes manifests (EKS / GKE / AKS /
+air-gapped on-prem), including the Secret and signed-manifest mounting runbook, are delivered to
+Enterprise Sovereign customers and are not published in this repository. Request it through the
+[enterprise pilot issue](https://github.com/Dirgha-AI/dirgha/issues/new).
