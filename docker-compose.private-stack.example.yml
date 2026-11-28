@@ -1,11 +1,16 @@
-# Dirgha 2.0 Private Sovereign Stack — Reference Docker Compose
+# Dirgha 2.0 Private Sovereign Stack — example Docker Compose template
 #
-# Core service runs Dirgha daemon with optional Organization Policy Lock.
+# This is the published shape of the private stack, not the private stack itself.
+# The hardened, production-configured bundle (Compose file and Kubernetes
+# manifests) ships to enterprise customers on request; see README.md.
+#
+# Core service runs the Dirgha daemon with optional Organization Policy Lock.
 # Optional profiles let enterprises enable only what they need:
 #   --profile local-llm   : Air-gapped local inference via Ollama
 #   --profile security    : On-demand Arniko/SARIF security scanning workspace
 #
-# Never commit real secrets to this file. Supply tokens via `.env` or your secret manager.
+# Every credential is supplied through the environment. Never commit real
+# secrets to this file: pass them via `.env` or your secret manager.
 
 services:
   dirgha-daemon:
@@ -19,12 +24,12 @@ services:
       DIRGHA_LOKAHI_MODE: "${DIRGHA_LOKAHI_MODE:-enforce}"
       DIRGHA_ARNIKO: "${DIRGHA_ARNIKO:-true}"
       DIRGHA_GPU_MARKET: "${DIRGHA_GPU_MARKET:-true}"
-      DIRGHA_ORG_POLICY: "${DIRGHA_ORG_POLICY:-/etc/dirgha/policy.json}"
-      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
-      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
-      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
-      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
-      OLLAMA_HOST: "${OLLAMA_HOST:-http://ollama:11434}"
+      DIRGHA_ORG_POLICY: "${DIRGHA_ORG_POLICY}"
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY}"
+      OLLAMA_HOST: "${OLLAMA_HOST}"
     volumes:
       - .:/workspace/dirgha:ro
       - dirgha-state:/root/.dirgha
@@ -40,8 +45,6 @@ services:
     container_name: dirgha-ollama
     profiles: ["local-llm"]
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:11434:11434"
     volumes:
       - ollama-models:/root/.ollama
     networks:
@@ -58,7 +61,7 @@ services:
       DIRGHA_ARNIKO: "true"
     volumes:
       - .:/workspace/dirgha:ro
-      - ${SCAN_TARGET_DIR:-.}:/workspace/target:ro
+      - ${SCAN_TARGET_DIR}:/workspace/target:ro
     networks:
       - dirgha-internal
     security_opt:
